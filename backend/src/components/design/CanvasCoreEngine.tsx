@@ -5,9 +5,10 @@ import { useEditorStore } from "@/store/useEditorStore";
 // --- FABRIC.JS 5.x BUG FIX ---
 // Prevents `Cannot read properties of undefined (reading '0')` in `stylesToArray`
 // when serializing IText/Textbox objects that have undefined `styles`.
-if (fabric.util && fabric.util.stylesToArray) {
-  const originalStylesToArray = fabric.util.stylesToArray;
-  fabric.util.stylesToArray = function (styles, text) {
+const utilAny = fabric.util as any;
+if (utilAny && utilAny.stylesToArray) {
+  const originalStylesToArray = utilAny.stylesToArray;
+  utilAny.stylesToArray = function (styles: any, text: any) {
     return originalStylesToArray(styles || {}, text || "");
   };
 }
