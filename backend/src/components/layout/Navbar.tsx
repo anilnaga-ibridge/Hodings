@@ -364,7 +364,7 @@ export const Navbar: React.FC = () => {
 
       {/* MOBILE NAV MENU DRAWER */}
       {isMobileMenuOpen && (
-        <div className="lg:hidden border-t border-purple-100 bg-white px-4 py-4 space-y-4 animate-fade-in">
+        <div className="lg:hidden border-t border-purple-100 bg-white px-4 py-4 space-y-4 animate-fade-in max-h-[calc(100vh-4rem)] overflow-y-auto overscroll-contain">
           
           {/* Mobile Public Navigation */}
           {!user ? (

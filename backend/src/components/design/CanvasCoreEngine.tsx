@@ -1,6 +1,17 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { fabric } from "fabric";
 import { useEditorStore } from "@/store/useEditorStore";
+
+// --- FABRIC.JS 5.x BUG FIX ---
+// Prevents `Cannot read properties of undefined (reading '0')` in `stylesToArray`
+// when serializing IText/Textbox objects that have undefined `styles`.
+if (fabric.util && fabric.util.stylesToArray) {
+  const originalStylesToArray = fabric.util.stylesToArray;
+  fabric.util.stylesToArray = function (styles, text) {
+    return originalStylesToArray(styles || {}, text || "");
+  };
+}
+// -----------------------------
 
 interface CanvasCoreEngineProps {
   initialCanvasJson?: string;
@@ -11,26 +22,37 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
   initialCanvasJson,
   onCanvasReady,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [canvasInstance, setCanvasInstance] = useState<fabric.Canvas | null>(null);
+  const fabricRef = useRef<fabric.Canvas | null>(null);
+  const onCanvasReadyRef = useRef(onCanvasReady);
+  onCanvasReadyRef.current = onCanvasReady;
 
   const {
-    zoom,
     setZoom,
-    panX,
-    panY,
     setPan,
     snapToGrid,
     canvasWidth,
     canvasHeight,
   } = useEditorStore();
 
-  // Initialize Fabric Canvas
-  useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+  // Store snapToGrid in a ref so the object:moving handler always reads the latest value
+  const snapToGridRef = useRef(snapToGrid);
+  snapToGridRef.current = snapToGrid;
 
-    const fabricCanvas = new fabric.Canvas(canvasRef.current, {
+  // Initialize Fabric Canvas — runs ONCE per mount
+  useEffect(() => {
+    if (!canvasElRef.current || !containerRef.current) return;
+
+    // If already initialized (React strict mode re-run), just re-notify parent
+    if (fabricRef.current) {
+      if (onCanvasReadyRef.current) {
+        onCanvasReadyRef.current(fabricRef.current);
+      }
+      return;
+    }
+
+    const fabricCanvas = new fabric.Canvas(canvasElRef.current, {
       width: canvasWidth,
       height: canvasHeight,
       backgroundColor: "#ffffff",
@@ -38,9 +60,10 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
       selection: true,
     });
 
-    setCanvasInstance(fabricCanvas);
-    if (onCanvasReady) {
-      onCanvasReady(fabricCanvas);
+    fabricRef.current = fabricCanvas;
+
+    if (onCanvasReadyRef.current) {
+      onCanvasReadyRef.current(fabricCanvas);
     }
 
     // Load initial JSON data if provided
@@ -56,14 +79,14 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
     }
 
     // Center and scale to viewport initially
-    const containerWidth = containerRef.current.clientWidth;
-    const containerHeight = containerRef.current.clientHeight;
-    const scaleX = containerWidth / canvasWidth;
-    const scaleY = containerHeight / canvasHeight;
-    const initialScale = Math.min(scaleX, scaleY, 1.0) * 0.9; // 90% size
+    const cw = containerRef.current.clientWidth;
+    const ch = containerRef.current.clientHeight;
+    const scaleX = cw / canvasWidth;
+    const scaleY = ch / canvasHeight;
+    const initialScale = Math.min(scaleX, scaleY, 1.0) * 0.9;
 
-    const centerPanX = (containerWidth - canvasWidth * initialScale) / 2;
-    const centerPanY = (containerHeight - canvasHeight * initialScale) / 2;
+    const centerPanX = (cw - canvasWidth * initialScale) / 2;
+    const centerPanY = (ch - canvasHeight * initialScale) / 2;
 
     setZoom(initialScale);
     setPan(centerPanX, centerPanY);
@@ -71,14 +94,13 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
     fabricCanvas.setZoom(initialScale);
     fabricCanvas.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
 
-    // Handle Pan & Zoom via Mouse Events
+    // ── Pan & Zoom via Mouse ──
     let isDragging = false;
     let lastX = 0;
     let lastY = 0;
 
     fabricCanvas.on("mouse:down", (opt) => {
       const evt = opt.e;
-      // Spacebar or Middle mouse click to drag/pan
       if (evt.altKey || evt.shiftKey || opt.target === null) {
         isDragging = true;
         fabricCanvas.selection = false;
@@ -92,17 +114,9 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
         const evt = opt.e;
         const currentX = evt.clientX || (evt as any).touches?.[0]?.clientX;
         const currentY = evt.clientY || (evt as any).touches?.[0]?.clientY;
-        const deltaX = currentX - lastX;
-        const deltaY = currentY - lastY;
-        
-        fabricCanvas.relativePan(new fabric.Point(deltaX, deltaY));
-        
-        // Sync pan back to store
+        fabricCanvas.relativePan(new fabric.Point(currentX - lastX, currentY - lastY));
         const vpt = fabricCanvas.viewportTransform;
-        if (vpt) {
-          setPan(vpt[4], vpt[5]);
-        }
-        
+        if (vpt) setPan(vpt[4], vpt[5]);
         lastX = currentX;
         lastY = currentY;
       }
@@ -113,133 +127,123 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
       fabricCanvas.selection = true;
     });
 
-    // Zoom on wheel (Ctrl + Wheel)
+    // Zoom on wheel
     fabricCanvas.on("mouse:wheel", (opt) => {
-      const delta = opt.e.deltaY;
-      let targetZoom = fabricCanvas.getZoom();
-      targetZoom *= 0.999 ** delta;
-      
-      // Constraints
+      let targetZoom = fabricCanvas.getZoom() * 0.999 ** opt.e.deltaY;
       if (targetZoom > 20) targetZoom = 20;
       if (targetZoom < 0.05) targetZoom = 0.05;
-
       fabricCanvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, targetZoom);
       setZoom(targetZoom);
-
       const vpt = fabricCanvas.viewportTransform;
-      if (vpt) {
-        setPan(vpt[4], vpt[5]);
-      }
-
+      if (vpt) setPan(vpt[4], vpt[5]);
       opt.e.preventDefault();
       opt.e.stopPropagation();
     });
 
-    // Handle snaps to grid when objects are moving
+    // Snap to grid (reads from ref so the effect doesn't need snapToGrid as a dep)
     fabricCanvas.on("object:moving", (options) => {
-      if (!snapToGrid) return;
+      if (!snapToGridRef.current) return;
       const target = options.target;
       if (!target) return;
-
       const gridSize = 20;
-      
-      // Snap positions
-      const snappedLeft = Math.round((target.left || 0) / gridSize) * gridSize;
-      const snappedTop = Math.round((target.top || 0) / gridSize) * gridSize;
-
       target.set({
-        left: snappedLeft,
-        top: snappedTop,
+        left: Math.round((target.left || 0) / gridSize) * gridSize,
+        top: Math.round((target.top || 0) / gridSize) * gridSize,
       });
     });
 
-    // Resize Handler
-    const handleResize = () => {
-      if (!containerRef.current || !fabricCanvas) return;
-      // Optionally update canvas element container size
-    };
-
+    const handleResize = () => { /* placeholder */ };
     window.addEventListener("resize", handleResize);
 
     return () => {
       window.removeEventListener("resize", handleResize);
       fabricCanvas.dispose();
+      fabricRef.current = null;
     };
-  }, [canvasWidth, canvasHeight, snapToGrid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Handle Drag Over
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
+  useEffect(() => {
+    if (fabricRef.current && containerRef.current) {
+      fabricRef.current.setWidth(canvasWidth);
+      fabricRef.current.setHeight(canvasHeight);
 
-  // Handle Drag & Drop to Create Elements
+      const cw = containerRef.current.clientWidth;
+      const ch = containerRef.current.clientHeight;
+      const scaleX = cw / canvasWidth;
+      const scaleY = ch / canvasHeight;
+      const initialScale = Math.min(scaleX, scaleY, 1.0) * 0.9;
+
+      const centerPanX = (cw - canvasWidth * initialScale) / 2;
+      const centerPanY = (ch - canvasHeight * initialScale) / 2;
+
+      setZoom(initialScale);
+      setPan(centerPanX, centerPanY);
+
+      fabricRef.current.setZoom(initialScale);
+      fabricRef.current.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
+      fabricRef.current.renderAll();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasWidth, canvasHeight]);
+
+  // ── Drag & Drop ──
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!canvasInstance) return;
+    const canvas = fabricRef.current;
+    if (!canvas) return;
 
     const dataStr = e.dataTransfer.getData("application/json");
     if (!dataStr) return;
 
     try {
       const data = JSON.parse(dataStr);
-      const rect = canvasInstance.getElement().getBoundingClientRect();
-      const clientX = e.clientX - rect.left;
-      const clientY = e.clientY - rect.top;
-
-      // Transform coordinate system from screen to canvas using viewport transform
-      const vpt = canvasInstance.viewportTransform;
+      const rect = canvas.getElement().getBoundingClientRect();
+      const vpt = canvas.viewportTransform;
       if (!vpt) return;
 
-      const canvasX = (clientX - vpt[4]) / vpt[0];
-      const canvasY = (clientY - vpt[5]) / vpt[3];
+      const canvasX = (e.clientX - rect.left - vpt[4]) / vpt[0];
+      const canvasY = (e.clientY - rect.top - vpt[5]) / vpt[3];
 
-      let newObject: fabric.Object | null = null;
+      let obj: fabric.Object | null = null;
 
       if (data.type === "text") {
-        newObject = new fabric.IText(data.content || "Double click to edit", {
-          left: canvasX,
-          top: canvasY,
+        obj = new fabric.IText(data.content || "Double click to edit", {
+          left: canvasX, top: canvasY,
           fontFamily: data.fontFamily || "Inter",
           fontSize: data.fontSize || 32,
           fill: data.fill || "#000000",
+          styles: {},
         });
       } else if (data.type === "rect") {
-        newObject = new fabric.Rect({
-          left: canvasX,
-          top: canvasY,
-          width: data.width || 150,
-          height: data.height || 150,
+        obj = new fabric.Rect({
+          left: canvasX, top: canvasY,
+          width: data.width || 150, height: data.height || 150,
           fill: data.fill || "#3B82F6",
         });
       } else if (data.type === "circle") {
-        newObject = new fabric.Circle({
-          left: canvasX,
-          top: canvasY,
+        obj = new fabric.Circle({
+          left: canvasX, top: canvasY,
           radius: data.radius || 75,
           fill: data.fill || "#10B981",
         });
       } else if (data.type === "image" && data.src) {
-        fabric.Image.fromURL(
-          data.src,
-          (img) => {
-            img.set({
-              left: canvasX,
-              top: canvasY,
-            });
-            img.scaleToWidth(data.width || 300);
-            canvasInstance.add(img);
-            canvasInstance.setActiveObject(img);
-            canvasInstance.renderAll();
-          },
-          { crossOrigin: "anonymous" }
-        );
+        fabric.Image.fromURL(data.src, (img) => {
+          img.set({ left: canvasX, top: canvasY });
+          img.scaleToWidth(data.width || 300);
+          canvas.add(img);
+          canvas.setActiveObject(img);
+          canvas.renderAll();
+        }, { crossOrigin: "anonymous" });
         return;
       }
 
-      if (newObject) {
-        canvasInstance.add(newObject);
-        canvasInstance.setActiveObject(newObject);
-        canvasInstance.renderAll();
+      if (obj) {
+        canvas.add(obj);
+        canvas.setActiveObject(obj);
+        canvas.renderAll();
       }
     } catch (err) {
       console.error("Drop payload decoding failed", err);
@@ -255,7 +259,7 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
     >
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:40px_40px]"></div>
       <div className="shadow-2xl border border-slate-300 overflow-hidden bg-white">
-        <canvas ref={canvasRef} />
+        <canvas ref={canvasElRef} />
       </div>
     </div>
   );

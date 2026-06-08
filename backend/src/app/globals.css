@@ -39,6 +39,26 @@
 }
 
 @layer base {
+  html {
+    scroll-padding-top: 4.5rem;
+  }
+
+  /* Lenis smooth scroll overrides to prevent conflicts */
+  html.lenis, html.lenis body {
+    height: auto;
+  }
+
+  .lenis.lenis-smooth {
+    scroll-behavior: auto !important;
+  }
+
+  .lenis.lenis-smooth [data-lenis-prevent] {
+    overscroll-behavior: contain;
+  }
+
+  .lenis.lenis-stopped {
+    overflow: hidden;
+  }
   * {
     border-color: hsl(var(--border));
     font-family: 'Outfit', sans-serif;

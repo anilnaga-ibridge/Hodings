@@ -39,11 +39,12 @@ interface EditorState {
   // Actions
   setZoom: (zoom: number) => void;
   setPan: (x: number, y: number) => void;
+  setDimensions: (width: number, height: number) => void;
   setElements: (elements: CanvasElement[]) => void;
   updateElement: (id: string, properties: Partial<CanvasElement>) => void;
-  saveHistory: () => void;
-  undo: () => void;
-  redo: () => void;
+  saveHistory: (serialized: string) => void;
+  undo: () => string | null;
+  redo: () => string | null;
   clearStore: () => void;
   toggleSnapToGrid: () => void;
 }
@@ -63,6 +64,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setZoom: (zoom) => set({ zoom }),
   setPan: (panX, panY) => set({ panX, panY }),
+  setDimensions: (width, height) => set({ canvasWidth: width, canvasHeight: height }),
   
   setElements: (elements) => set({ elements }),
 
@@ -74,9 +76,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   toggleSnapToGrid: () => set((state) => ({ snapToGrid: !state.snapToGrid })),
 
-  saveHistory: () => {
-    const { elements, history, historyIndex } = get();
-    const serialized = JSON.stringify(elements);
+  saveHistory: (serialized) => {
+    const { history, historyIndex } = get();
     
     // Clear future history states if we were in the middle of undoing
     const updatedHistory = history.slice(0, historyIndex + 1);
@@ -98,18 +99,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { history, historyIndex } = get();
     if (historyIndex > 0) {
       const targetIdx = historyIndex - 1;
-      const elements = JSON.parse(history[targetIdx]);
-      set({ elements, historyIndex: targetIdx });
+      set({ historyIndex: targetIdx });
+      return history[targetIdx];
     }
+    return null;
   },
 
   redo: () => {
     const { history, historyIndex } = get();
     if (historyIndex < history.length - 1) {
       const targetIdx = historyIndex + 1;
-      const elements = JSON.parse(history[targetIdx]);
-      set({ elements, historyIndex: targetIdx });
+      set({ historyIndex: targetIdx });
+      return history[targetIdx];
     }
+    return null;
   },
 
   clearStore: () => set({

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { fetchProfile, updateProfile, forceLogout, toggleMfa } from "@/store/slices/authSlice";
 import { fetchOwnerBillboards, createBillboard, updateBillboard, deleteBillboard } from "@/store/slices/billboardSlice";
@@ -9,7 +9,8 @@ import {
   User, ShieldAlert, Sparkles, Download, Trash2, Mail, Bell, 
   Building, Check, RefreshCw, Plus, MapPin, LayoutGrid, DollarSign, 
   Eye, Info, CheckCircle2, AlertTriangle, Palette, Type, FolderOpen,
-  ShieldCheck, Copy, ExternalLink, Share2, Users, CheckSquare, Camera
+  ShieldCheck, Copy, ExternalLink, Share2, Users, CheckSquare, Camera,
+  CreditCard, Receipt, Clock, Headphones, MessageSquare, HelpCircle, Send, ChevronDown, ChevronUp, LifeBuoy
 } from "lucide-react";
 
 export const DashboardPage: React.FC = () => {
@@ -18,9 +19,16 @@ export const DashboardPage: React.FC = () => {
   const { brandAssets, loading: brandLoading } = useAppSelector((state) => state.brand);
   const dispatch = useAppDispatch();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
 
   // Tab controls
-  const [activeSubTab, setActiveSubTab] = useState<string>("settings");
+  const [activeSubTab, setActiveSubTab] = useState<string>("profile");
+
+  const setTab = (tab: string) => {
+    setActiveSubTab(tab);
+    window.history.pushState(null, "", `?tab=${tab}`);
+  };
 
   // Settings feedback
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -93,13 +101,23 @@ export const DashboardPage: React.FC = () => {
     { id: "task_3", title: "Inspect Structural Integrity", billboard: "Hollywood Highway Archway", location: "Los Angeles, CA", status: "In Progress", date: "June 12, 2026" }
   ]);
 
+  // Support Tab States
+  const [supportCategory, setSupportCategory] = useState("Technical Issue");
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportSuccess, setSupportSuccess] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [activeFaq, setActiveFaq] = useState<number | null>(null);
+
   useEffect(() => {
     dispatch(fetchProfile());
   }, [dispatch]);
 
-  // Adjust default subtab based on role
+  // Adjust default subtab based on role or URL
   useEffect(() => {
-    if (user) {
+    if (tabParam) {
+      setActiveSubTab(tabParam);
+    } else if (user) {
       if (user.role === "CUSTOMER") {
         setActiveSubTab("brands");
       } else if (user.role === "PARTNER") {
@@ -110,7 +128,7 @@ export const DashboardPage: React.FC = () => {
         setActiveSubTab("inventory");
       }
     }
-  }, [user]);
+  }, [user, tabParam]);
 
   // Load appropriate data based on role
   useEffect(() => {
@@ -392,6 +410,19 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
+  const handleSupportSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSupportLoading(true);
+    // Simulate network delay
+    setTimeout(() => {
+      setSupportLoading(false);
+      setSupportSuccess(true);
+      setSupportSubject("");
+      setSupportMessage("");
+      setTimeout(() => setSupportSuccess(false), 5000);
+    }, 1500);
+  };
+
   if (!user) {
     return (
       <div className="flex justify-center py-20">
@@ -514,16 +545,40 @@ export const DashboardPage: React.FC = () => {
             </button>
           )}
 
-          {/* Common Settings tab */}
+          {/* Common Profile tab */}
           <button
-            onClick={() => setActiveSubTab("settings")}
+            onClick={() => setTab("profile")}
             className={`px-4 py-2 text-xs font-semibold rounded-md transition-all ${
-              activeSubTab === "settings"
+              activeSubTab === "profile"
                 ? "bg-purple-650 text-white shadow-sm"
                 : "text-slate-500 hover:text-purple-700 hover:bg-purple-100/50"
             }`}
           >
-            Settings
+            Profile
+          </button>
+
+          {/* Billing tab */}
+          <button
+            onClick={() => setTab("billing")}
+            className={`px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+              activeSubTab === "billing"
+                ? "bg-purple-650 text-white shadow-sm"
+                : "text-slate-500 hover:text-purple-700 hover:bg-purple-100/50"
+            }`}
+          >
+            Billing
+          </button>
+
+          {/* Support tab */}
+          <button
+            onClick={() => setTab("support")}
+            className={`px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+              activeSubTab === "support"
+                ? "bg-purple-650 text-white shadow-sm"
+                : "text-slate-500 hover:text-purple-700 hover:bg-purple-100/50"
+            }`}
+          >
+            Support
           </button>
 
           {/* Design Studio Link */}
@@ -537,7 +592,7 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* RENDER OPTION 1: SHARED PROFILE SETTINGS */}
-      {activeSubTab === "settings" && (
+      {activeSubTab === "profile" && (
         <div className="grid gap-8 md:grid-cols-3">
           {/* Settings Sidebar */}
           <div className="flex flex-col gap-6">
@@ -1853,6 +1908,316 @@ export const DashboardPage: React.FC = () => {
                   <span className="text-[10px] text-slate-400 mt-0.5">Please click on a task on the left to start verification</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* RENDER OPTION 5: BILLING & SUBSCRIPTIONS */}
+      {activeSubTab === "billing" && (
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-purple-655" /> Billing & Subscriptions
+            </h3>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {/* Left Column: Current Plan & Payment Methods */}
+            <div className="md:col-span-1 flex flex-col gap-6">
+              {/* Current Plan Card */}
+              <div className="bg-gradient-to-br from-purple-600 to-indigo-700 rounded-2xl p-6 shadow-md text-white relative overflow-hidden">
+                <div className="absolute -top-12 -right-12 h-32 w-32 bg-white opacity-10 rounded-full blur-2xl"></div>
+                <h4 className="text-sm font-bold opacity-90 flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" /> Current Plan
+                </h4>
+                <div className="mt-4 flex items-baseline gap-1">
+                  <span className="text-3xl font-extrabold">$29</span>
+                  <span className="text-xs opacity-80">/month</span>
+                </div>
+                <p className="text-xs font-semibold mt-1">Pro Creator Tier</p>
+                
+                <div className="mt-6 pt-4 border-t border-white/20 flex flex-col gap-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="opacity-80">Next billing date</span>
+                    <span className="font-bold">July 15, 2026</span>
+                  </div>
+                  <button className="w-full mt-3 bg-white text-purple-700 hover:bg-slate-50 py-2 rounded-lg text-xs font-bold transition-colors shadow-sm">
+                    Manage Subscription
+                  </button>
+                </div>
+              </div>
+
+              {/* Payment Methods */}
+              <div className="bg-white rounded-2xl p-6 border border-purple-100 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-purple-600" /> Payment Methods
+                  </h4>
+                  <button className="text-[10px] font-bold text-purple-600 hover:text-purple-800 transition-colors">
+                    + Add New
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-3 mt-2">
+                  <div className="flex items-center justify-between p-3 rounded-xl border-2 border-purple-200 bg-purple-50/50">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-12 bg-slate-800 rounded flex items-center justify-center shadow-sm border border-slate-700">
+                        <span className="text-white text-[9px] font-bold italic tracking-widest">VISA</span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-800">•••• 4242</span>
+                        <span className="text-[9px] text-slate-500">Expires 12/28</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-bold text-purple-700 bg-purple-100 border border-purple-200 px-2 py-0.5 rounded uppercase">Default</span>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:border-slate-200 bg-white transition-colors cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-12 bg-blue-50 border border-blue-100 rounded flex items-center justify-center shadow-sm">
+                        <span className="text-blue-600 text-[10px] font-bold italic tracking-tight">Pay<span className="text-blue-400">Pal</span></span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-800">john.doe@email.com</span>
+                        <span className="text-[9px] text-slate-500">Linked Account</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Billing History */}
+            <div className="md:col-span-2">
+              <div className="bg-white rounded-2xl p-6 border border-purple-100 shadow-sm flex flex-col h-full">
+                <div className="flex items-center justify-between border-b border-purple-50 pb-4 mb-4">
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-purple-600" /> Billing History
+                  </h4>
+                  <button className="text-[10px] font-bold text-slate-500 flex items-center gap-1 hover:text-purple-600 transition-colors">
+                    <Download className="h-3 w-3" /> Download All
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[400px]">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                        <th className="pb-3 font-semibold">Date</th>
+                        <th className="pb-3 font-semibold">Description</th>
+                        <th className="pb-3 font-semibold">Amount</th>
+                        <th className="pb-3 font-semibold">Status</th>
+                        <th className="pb-3 font-semibold text-right">Invoice</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-xs text-slate-700">
+                      <tr className="border-b border-slate-50 hover:bg-purple-50/30 transition-colors group cursor-pointer">
+                        <td className="py-4">Jun 15, 2026</td>
+                        <td className="py-4 font-semibold text-slate-800">Pro Creator Tier - Monthly</td>
+                        <td className="py-4 font-bold text-slate-900">$29.00</td>
+                        <td className="py-4">
+                          <span className="bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded text-[9px] font-bold uppercase">Paid</span>
+                        </td>
+                        <td className="py-4 text-right">
+                          <button className="text-purple-600 hover:text-purple-800 p-1.5 rounded-lg hover:bg-purple-100 transition-all">
+                            <Download className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-50 hover:bg-purple-50/30 transition-colors group cursor-pointer">
+                        <td className="py-4">May 15, 2026</td>
+                        <td className="py-4 font-semibold text-slate-800">Pro Creator Tier - Monthly</td>
+                        <td className="py-4 font-bold text-slate-900">$29.00</td>
+                        <td className="py-4">
+                          <span className="bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded text-[9px] font-bold uppercase">Paid</span>
+                        </td>
+                        <td className="py-4 text-right">
+                          <button className="text-purple-600 hover:text-purple-800 p-1.5 rounded-lg hover:bg-purple-100 transition-all">
+                            <Download className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                      <tr className="border-b border-slate-50 hover:bg-purple-50/30 transition-colors group cursor-pointer">
+                        <td className="py-4">Apr 15, 2026</td>
+                        <td className="py-4 font-semibold text-slate-800">Pro Creator Tier - Monthly</td>
+                        <td className="py-4 font-bold text-slate-900">$29.00</td>
+                        <td className="py-4">
+                          <span className="bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded text-[9px] font-bold uppercase">Paid</span>
+                        </td>
+                        <td className="py-4 text-right">
+                          <button className="text-purple-600 hover:text-purple-800 p-1.5 rounded-lg hover:bg-purple-100 transition-all">
+                            <Download className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RENDER OPTION 6: SUPPORT HUB */}
+      {activeSubTab === "support" && (
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <LifeBuoy className="h-5 w-5 text-purple-655" /> Help Center & Support
+            </h3>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
+            {/* Left Column: Contact Form */}
+            <div className="md:col-span-1 lg:col-span-2">
+              <div className="bg-white rounded-2xl p-6 border border-purple-100 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Headphones className="h-4 w-4 text-purple-600" /> Open a Support Ticket
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Our team typically responds within 2-4 hours during normal business operations.
+                </p>
+
+                {supportSuccess ? (
+                  <div className="flex flex-col items-center justify-center text-center py-10 bg-green-50 border border-green-200 rounded-xl">
+                    <CheckCircle2 className="h-10 w-10 text-green-600 mb-3" />
+                    <h5 className="font-bold text-green-800">Ticket Submitted Successfully</h5>
+                    <p className="text-xs text-green-700 mt-1 max-w-[200px]">We've received your request and will get back to you shortly via email.</p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSupportSubmit} className="flex flex-col gap-4 mt-2">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Category</label>
+                      <div className="relative">
+                        <select
+                          value={supportCategory}
+                          onChange={(e) => setSupportCategory(e.target.value)}
+                          className="w-full rounded-lg border border-purple-100 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-800 focus:border-purple-500 focus:bg-white focus:outline-none appearance-none"
+                        >
+                          <option>Technical Issue</option>
+                          <option>Billing & Payments</option>
+                          <option>Campaign Management</option>
+                          <option>Hardware Installation</option>
+                          <option>Other / General Inquiry</option>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Subject</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Brief summary of your issue"
+                        value={supportSubject}
+                        onChange={(e) => setSupportSubject(e.target.value)}
+                        className="rounded-lg border border-purple-100 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-purple-500 focus:bg-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Message</label>
+                      <textarea
+                        required
+                        rows={5}
+                        placeholder="Please provide as much detail as possible..."
+                        value={supportMessage}
+                        onChange={(e) => setSupportMessage(e.target.value)}
+                        className="rounded-lg border border-purple-100 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-purple-500 focus:bg-white focus:outline-none resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={supportLoading}
+                      className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg bg-purple-600 py-3 text-xs font-bold text-white hover:bg-purple-700 transition-colors shadow-sm disabled:opacity-70"
+                    >
+                      {supportLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      Submit Request
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: FAQs */}
+            <div className="md:col-span-1 lg:col-span-3">
+              <div className="bg-white rounded-2xl p-6 border border-purple-100 shadow-sm h-full flex flex-col">
+                <div className="flex items-center justify-between mb-6 border-b border-purple-50 pb-4">
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <HelpCircle className="h-4 w-4 text-purple-600" /> Frequently Asked Questions
+                  </h4>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {[
+                    {
+                      q: "How long does it take for a new billboard campaign to go live?",
+                      a: "For digital boards, campaigns can go live within 24 hours of creative approval. For static vinyl boards, please allow 5-7 business days for printing and physical installation."
+                    },
+                    {
+                      q: "What file formats do you accept for Design Studio assets?",
+                      a: "We accept high-resolution JPEG, PNG, WEBP, and vector SVG files. For full billboard layouts, we recommend exporting as a PDF/X-4."
+                    },
+                    {
+                      q: "Can I cancel or pause my subscription plan?",
+                      a: "Yes. You can manage your subscription under the Billing tab. If you pause, your active campaigns will run until the end of the current billing cycle."
+                    },
+                    {
+                      q: "How are campaign views and analytics calculated?",
+                      a: "Our system uses integrated geofencing and mobile telemetry data around the physical coordinates of the billboard to estimate daily vehicular and pedestrian traffic impressions."
+                    },
+                    {
+                      q: "Do I need to pay separately for printing costs on static boards?",
+                      a: "Yes, standard subscription plans cover platform access and listing fees. Physical printing and mounting incur a separate one-time operations fee depending on board size."
+                    }
+                  ].map((faq, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`border rounded-xl transition-all overflow-hidden ${activeFaq === idx ? 'border-purple-300 bg-purple-50/30' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
+                    >
+                      <button 
+                        onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
+                        className="w-full flex items-center justify-between p-4 text-left"
+                      >
+                        <span className="text-xs font-bold text-slate-800 pr-4">{faq.q}</span>
+                        {activeFaq === idx ? (
+                          <ChevronUp className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                        )}
+                      </button>
+                      
+                      {activeFaq === idx && (
+                        <div className="px-4 pb-4 text-xs text-slate-600 leading-relaxed border-t border-purple-100 pt-3">
+                          {faq.a}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-auto pt-8">
+                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-purple-100 p-2 rounded-lg">
+                        <MessageSquare className="h-5 w-5 text-purple-700" />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-bold text-slate-900">Need immediate assistance?</h5>
+                        <p className="text-[10px] text-slate-500">Call our emergency hotline for structural issues.</p>
+                      </div>
+                    </div>
+                    <button className="text-xs font-bold text-purple-700 bg-white border border-slate-200 px-4 py-2 rounded-lg hover:border-purple-300 transition-colors shadow-sm">
+                      1-800-HODINGS
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -30,6 +30,7 @@ import {
   CornerUpRight,
   Smile,
   X,
+  Search,
   MessageSquare,
   Presentation
 } from "lucide-react";
@@ -86,9 +87,12 @@ export const DesignStudioPage: React.FC = () => {
   const [newFolderName, setNewFolderName] = useState("");
   const [activeDesignId, setActiveDesignId] = useState<string | null>(null);
   const [designName, setDesignName] = useState("Untitled Project");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateCategory, setTemplateCategory] = useState("all");
   
   // Fabric canvas handle
   const [canvasRef, setCanvasRef] = useState<fabric.Canvas | null>(null);
+  const isHistoryChangingRef = useRef(false);
   const [selectedObject, setSelectedObject] = useState<fabric.Object | null>(null);
   
   // Modals & Panels
@@ -118,6 +122,11 @@ export const DesignStudioPage: React.FC = () => {
   // Design studio menu dropdown state
   const [activeMenu, setActiveMenu] = useState<"file" | "edit" | "view" | "share" | "export" | null>(null);
 
+  // Custom blank canvas size state
+  const [showCustomSize, setShowCustomSize] = useState(false);
+  const [customWidth, setCustomWidth] = useState(1920);
+  const [customHeight, setCustomHeight] = useState(1080);
+
   const {
     zoom,
     setZoom,
@@ -127,6 +136,11 @@ export const DesignStudioPage: React.FC = () => {
     redo,
     historyIndex,
     history,
+    saveHistory,
+    setDimensions,
+    clearStore,
+    canvasWidth,
+    canvasHeight,
   } = useEditorStore();
 
   // Fallback local data for unauthenticated / guest studio sessions
@@ -250,6 +264,20 @@ export const DesignStudioPage: React.FC = () => {
         });
       }
     });
+
+    // History tracking
+    canvas.on("object:added", () => {
+      if (!isHistoryChangingRef.current) saveHistory(JSON.stringify(canvas.toJSON()));
+    });
+    canvas.on("object:modified", () => {
+      if (!isHistoryChangingRef.current) saveHistory(JSON.stringify(canvas.toJSON()));
+    });
+    canvas.on("object:removed", () => {
+      if (!isHistoryChangingRef.current) saveHistory(JSON.stringify(canvas.toJSON()));
+    });
+    
+    // Save initial state
+    saveHistory(JSON.stringify(canvas.toJSON()));
   };
 
   // Add items programmatically
@@ -289,6 +317,7 @@ export const DesignStudioPage: React.FC = () => {
       fontFamily: fontFam,
       fill: "#1E293B",
       fontWeight: "bold",
+      styles: {},
     });
     canvasRef.add(text);
     canvasRef.setActiveObject(text);
@@ -309,16 +338,22 @@ export const DesignStudioPage: React.FC = () => {
 
   // Handle template insertion
   const insertTemplate = (tpl: Template) => {
-    if (!canvasRef) return;
+    if (!canvasRef) {
+      alert("Canvas is still loading. Please wait a moment and try again.");
+      return;
+    }
     try {
-      const parsed = JSON.parse(tpl.canvasJson);
-      canvasRef.loadFromJSON(parsed, () => {
+      isHistoryChangingRef.current = true;
+      canvasRef.loadFromJSON(JSON.parse(tpl.canvasJson), () => {
         canvasRef.renderAll();
+        isHistoryChangingRef.current = false;
+        saveHistory(tpl.canvasJson);
       });
       setDesignName(tpl.name);
       setActiveDesignId(tpl.id);
     } catch (err) {
       console.error(err);
+      alert("Error loading template: " + (err as Error).message);
     }
   };
 
@@ -483,6 +518,43 @@ export const DesignStudioPage: React.FC = () => {
     return canvasRef.toDataURL({ format: "png", quality: 0.8 });
   };
 
+  // ─── Template visual metadata (maps template id → thumbnail look) ───────
+  interface TemplateMeta {
+    gradient: string;
+    accent: string;
+    category: string;
+    badge: string;
+    badgeBg: string;
+  }
+  const TEMPLATE_META: Record<string, TemplateMeta> = {
+    template_001: { gradient: "from-slate-900 via-slate-800 to-purple-950", accent: "#ec4899", category: "Billboard", badge: "Modern", badgeBg: "#7c3aed" },
+    template_002: { gradient: "from-[#0f0920] via-[#1a0c3a] to-[#0f0920]", accent: "#7c3aed", category: "Billboard", badge: "Tech", badgeBg: "#06b6d4" },
+    template_003: { gradient: "from-[#110a05] via-[#2a1205] to-[#0d0802]", accent: "#ea580c", category: "Billboard", badge: "Food", badgeBg: "#ea580c" },
+    template_004: { gradient: "from-[#0a0905] via-[#1c1710] to-[#0a0905]", accent: "#ca8a04", category: "Real Estate", badge: "Luxury", badgeBg: "#ca8a04" },
+    template_005: { gradient: "from-[#0a0010] via-[#1a0020] to-[#0f0018]", accent: "#ef4444", category: "Fitness", badge: "Gym", badgeBg: "#ef4444" },
+    template_006: { gradient: "from-[#050b10] via-[#0a1825] to-[#050b10]", accent: "#14b8a6", category: "Agency", badge: "Creative", badgeBg: "#14b8a6" },
+    template_007: { gradient: "from-[#0f0510] via-[#1e0a20] to-[#0f0510]", accent: "#f43f5e", category: "Fashion", badge: "Lifestyle", badgeBg: "#f43f5e" },
+    template_008: { gradient: "from-[#180000] via-[#2a0505] to-[#180000]", accent: "#f59e0b", category: "Promotion", badge: "Sale", badgeBg: "#f59e0b" },
+    template_009: { gradient: "from-[#0a0a0a] via-[#1a0a0a] to-[#0a0a0a]", accent: "#dc2626", category: "Billboard", badge: "Auto", badgeBg: "#dc2626" },
+    template_010: { gradient: "from-[#1a120b] via-[#2a1a10] to-[#1a120b]", accent: "#d97706", category: "Food", badge: "Café", badgeBg: "#d97706" },
+    template_011: { gradient: "from-[#0c0a1d] via-[#1a1040] to-[#0c0a1d]", accent: "#fbbf24", category: "Promotion", badge: "E-Com", badgeBg: "#6d28d9" },
+    template_012: { gradient: "from-[#f0fdfa] via-[#ccfbf1] to-[#f0fdfa]", accent: "#0d9488", category: "Billboard", badge: "Health", badgeBg: "#0d9488" },
+    template_013: { gradient: "from-[#0f172a] via-[#1e293b] to-[#0f172a]", accent: "#3b82f6", category: "Billboard", badge: "Edu", badgeBg: "#1e40af" },
+    template_014: { gradient: "from-[#09090b] via-[#1a0a15] to-[#09090b]", accent: "#be123c", category: "Billboard", badge: "Event", badgeBg: "#be123c" },
+  };
+  const DEFAULT_META: TemplateMeta = { gradient: "from-slate-900 via-slate-800 to-slate-900", accent: "#7c3aed", category: "Design", badge: "Template", badgeBg: "#7c3aed" };
+
+  // ─── Category filters ─────────────────────────────────────────────────────
+  const TEMPLATE_CATEGORIES = ["all", "Billboard", "Banner", "Poster", "Promotion", "Real Estate", "Fitness", "Fashion", "Food", "Tech", "Agency"];
+
+  // ─── Filtered templates ───────────────────────────────────────────────────
+  const filteredTemplates = templates.filter((tpl) => {
+    const meta = TEMPLATE_META[tpl.id] ?? DEFAULT_META;
+    const matchSearch = tpl.name.toLowerCase().includes(templateSearch.toLowerCase());
+    const matchCat = templateCategory === "all" || meta.category === templateCategory;
+    return matchSearch && matchCat;
+  });
+
   return (
     <div className="flex flex-col h-screen bg-[#FAF9FE] text-slate-800 font-sans antialiased overflow-hidden">
       {/* Top Header Controls */}
@@ -569,7 +641,14 @@ export const DesignStudioPage: React.FC = () => {
                 <div className="absolute left-0 mt-2 w-48 rounded-lg bg-white border border-purple-100 p-1 shadow-xl z-50">
                   <button
                     onClick={() => {
-                      undo();
+                      const state = undo();
+                      if (state && canvasRef) {
+                        isHistoryChangingRef.current = true;
+                        canvasRef.loadFromJSON(JSON.parse(state), () => {
+                          canvasRef.renderAll();
+                          isHistoryChangingRef.current = false;
+                        });
+                      }
                       setActiveMenu(null);
                     }}
                     className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-750 rounded"
@@ -578,7 +657,14 @@ export const DesignStudioPage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => {
-                      redo();
+                      const state = redo();
+                      if (state && canvasRef) {
+                        isHistoryChangingRef.current = true;
+                        canvasRef.loadFromJSON(JSON.parse(state), () => {
+                          canvasRef.renderAll();
+                          isHistoryChangingRef.current = false;
+                        });
+                      }
                       setActiveMenu(null);
                     }}
                     className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-750 rounded"
@@ -838,28 +924,224 @@ export const DesignStudioPage: React.FC = () => {
         </nav>
 
         {/* Tab Detail Drawer Panel */}
-        <aside className="w-80 bg-white border-r border-purple-100 overflow-y-auto px-5 py-6 z-10 flex flex-col space-y-6">
+        <aside 
+          data-lenis-prevent="true"
+          className={`w-80 bg-white border-r border-purple-100 flex flex-col z-10 relative ${
+            activeTab === "templates" 
+              ? "overflow-hidden p-0" 
+              : "overflow-y-auto px-5 py-6 space-y-6"
+          }`}
+        >
           
-          {/* Templates Drawer */}
+          {/* ── Canva-style Templates Library Drawer ── */}
           {activeTab === "templates" && (
-            <div className="space-y-4">
-              <h3 className="font-bold text-sm text-slate-800 flex items-center space-x-1.5">
-                <Layout className="w-4 h-4 text-purple-600" />
-                <span>Template Library</span>
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                {templates.map((tpl) => (
-                  <div
-                    key={tpl.id}
-                    onClick={() => insertTemplate(tpl)}
-                    className="group relative rounded-lg border border-purple-100 bg-slate-50 p-2 cursor-pointer hover:border-purple-500 hover:bg-purple-50/50 transition shadow-sm"
+            <div className="flex flex-col absolute inset-0">
+
+              {/* ── Header + Search ── */}
+              <div className="px-4 pt-5 pb-3 border-b border-purple-50 shrink-0">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                    <Layout className="w-4 h-4 text-purple-600" />
+                    Templates
+                  </h3>
+                  <span className="text-[10px] font-semibold text-purple-500 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">
+                    {filteredTemplates.length + 1} designs
+                  </span>
+                </div>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search templates…"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    className="w-full bg-slate-50 border border-purple-100 text-slate-700 text-xs pl-8 pr-8 py-2 rounded-lg focus:outline-none focus:border-purple-400 focus:bg-white transition"
+                  />
+                  {templateSearch && (
+                    <button
+                      onClick={() => setTemplateSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Category Pills ── */}
+              <div className="flex flex-wrap gap-1.5 px-4 py-2.5 shrink-0 border-b border-purple-50">
+                {TEMPLATE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setTemplateCategory(cat)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold leading-tight tracking-wide transition ${
+                      templateCategory === cat
+                        ? "bg-purple-600 text-white shadow-sm"
+                        : "bg-slate-100 text-slate-500 hover:bg-purple-50 hover:text-purple-700"
+                    }`}
                   >
-                    <div className="aspect-video w-full rounded bg-purple-100/30 flex items-center justify-center text-[10px] text-purple-700 overflow-hidden font-bold">
-                      {tpl.name.split(" ")[0]} Ad
-                    </div>
-                    <p className="mt-1.5 text-[11px] font-semibold truncate text-slate-700 group-hover:text-purple-750">{tpl.name}</p>
-                  </div>
+                    {cat === "all" ? "✦ All" : cat}
+                  </button>
                 ))}
+              </div>
+
+              {/* ── Scrollable Template Grid ── */}
+              <div data-lenis-prevent="true" className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3 pb-24">
+
+                {/* Blank Canvas Card */}
+                {showCustomSize ? (
+                  <div className="w-full rounded-xl border-2 border-purple-300 bg-purple-50/50 p-4 shadow-sm animate-fade-in">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5 text-purple-600" />
+                        Custom Size
+                      </span>
+                      <button onClick={() => setShowCustomSize(false)} className="text-slate-400 hover:text-slate-600">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="flex-1">
+                        <label className="text-[10px] text-slate-500 font-semibold mb-1 block">Width (px)</label>
+                        <input 
+                          type="number" 
+                          value={customWidth} 
+                          onChange={(e) => setCustomWidth(Number(e.target.value))}
+                          className="w-full text-xs p-1.5 border border-purple-200 rounded text-center focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <X className="w-3 h-3 text-slate-300 mt-4" />
+                      <div className="flex-1">
+                        <label className="text-[10px] text-slate-500 font-semibold mb-1 block">Height (px)</label>
+                        <input 
+                          type="number" 
+                          value={customHeight} 
+                          onChange={(e) => setCustomHeight(Number(e.target.value))}
+                          className="w-full text-xs p-1.5 border border-purple-200 rounded text-center focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (canvasRef) {
+                          setDimensions(customWidth, customHeight);
+                          isHistoryChangingRef.current = true;
+                          const allObjects = canvasRef.getObjects();
+                          canvasRef.remove(...allObjects);
+                          canvasRef.setBackgroundColor("#ffffff", () => {
+                            canvasRef.renderAll();
+                            clearStore();
+                            saveHistory(JSON.stringify(canvasRef.toJSON()));
+                            isHistoryChangingRef.current = false;
+                          });
+                          setDesignName("Untitled Design");
+                          setActiveDesignId(null);
+                          setShowCustomSize(false);
+                        } else {
+                          alert("Canvas is still loading. Please wait a moment and try again.");
+                        }
+                      }}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded text-xs transition shadow-sm"
+                    >
+                      Create new design
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomSize(true)}
+                    className="w-full group relative rounded-xl border-2 border-dashed border-purple-200 bg-gradient-to-br from-purple-50/60 to-slate-50 p-2.5 cursor-pointer hover:border-purple-500 hover:from-purple-50 hover:to-purple-50/40 transition-all duration-200"
+                  >
+                    <div className="aspect-video w-full rounded-lg bg-white/80 flex flex-col items-center justify-center border border-purple-100 group-hover:border-purple-300 transition">
+                      <div className="w-8 h-8 rounded-full bg-purple-100 group-hover:bg-purple-200 transition flex items-center justify-center mb-1.5">
+                        <Plus className="w-4 h-4 text-purple-600" />
+                      </div>
+                      <span className="text-[10px] font-bold text-purple-500 group-hover:text-purple-700 transition">Blank Canvas</span>
+                    </div>
+                    <p className="mt-2 text-[11px] font-semibold text-slate-500 group-hover:text-slate-700 transition text-left">Start from Scratch</p>
+                    <p className="text-[10px] text-slate-400 text-left">Custom dimensions</p>
+                  </button>
+                )}
+
+                {/* Template Cards */}
+                {filteredTemplates.length === 0 && templateSearch && (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <Search className="w-8 h-8 text-slate-300 mb-2" />
+                    <p className="text-xs font-semibold text-slate-400">No templates found</p>
+                    <p className="text-[10px] text-slate-300 mt-0.5">Try a different search term</p>
+                  </div>
+                )}
+
+                {filteredTemplates.map((tpl) => {
+                  const meta = TEMPLATE_META[tpl.id] ?? DEFAULT_META;
+                  return (
+                    <div
+                      key={tpl.id}
+                      onClick={() => insertTemplate(tpl)}
+                      className="group relative rounded-xl overflow-hidden cursor-pointer border border-slate-200 hover:border-purple-400 transition-all duration-200 shadow-sm hover:shadow-lg"
+                    >
+                      {/* ── Thumbnail Preview ── */}
+                      <div className={`aspect-video w-full bg-gradient-to-br ${meta.gradient} relative overflow-hidden`}>
+                        {/* Decorative accent circle */}
+                        <div
+                          className="absolute -right-6 -top-6 w-20 h-20 rounded-full opacity-50"
+                          style={{ backgroundColor: meta.accent }}
+                        />
+                        <div
+                          className="absolute -right-3 -top-3 w-12 h-12 rounded-full opacity-25 border-2"
+                          style={{ borderColor: meta.accent }}
+                        />
+                        {/* Mini design preview lines */}
+                        <div className="absolute inset-0 p-4 flex flex-col justify-between">
+                          <div className="space-y-1.5">
+                            <div
+                              className="h-1.5 rounded-full w-2/5 opacity-80"
+                              style={{ backgroundColor: meta.accent }}
+                            />
+                            <div className="h-3.5 bg-white rounded-md w-full opacity-90" />
+                            <div className="h-3 bg-white/70 rounded-md w-4/5" />
+                            <div className="h-2.5 bg-white/40 rounded-md w-3/5" />
+                          </div>
+                          <div
+                            className="h-6 w-20 rounded-lg opacity-90"
+                            style={{ backgroundColor: meta.accent }}
+                          />
+                        </div>
+                        {/* Category badge */}
+                        <div className="absolute top-2 left-2 z-10">
+                          <span
+                            className="text-white text-[9px] font-bold px-2 py-0.5 rounded-full"
+                            style={{ backgroundColor: meta.badgeBg + "cc" }}
+                          >
+                            {meta.badge}
+                          </span>
+                        </div>
+                        {/* Hover Overlay */}
+                        <div className="absolute inset-0 bg-purple-950/0 group-hover:bg-purple-950/65 transition-all duration-200 flex items-center justify-center">
+                          <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-2 group-hover:translate-y-0">
+                            <span className="bg-white text-purple-700 text-[11px] font-bold px-4 py-2 rounded-full shadow-xl border border-purple-100">
+                              Use template
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Card Footer */}
+                      <div className="px-3 py-2.5 bg-white flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <p className="text-[11px] font-semibold text-slate-700 truncate leading-tight">{tpl.name}</p>
+                          <p className="text-[10px] text-slate-400 leading-tight mt-0.5 truncate">{meta.category} · {tpl.width}×{tpl.height}</p>
+                        </div>
+                        <span className="shrink-0 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full mt-0.5">Free</span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Footer padding */}
+                <div className="h-4" />
               </div>
             </div>
           )}
@@ -884,34 +1166,43 @@ export const DesignStudioPage: React.FC = () => {
                           className="w-7 h-7 rounded border border-purple-200 cursor-pointer hover:scale-105 transition shadow-sm" 
                           style={{ backgroundColor: asset.colorPalette.primary }}
                           onClick={() => {
-                            if (canvasRef && selectedObject) {
+                            if (!canvasRef) return;
+                            if (selectedObject) {
                               selectedObject.set("fill", asset.colorPalette?.primary);
                               canvasRef.renderAll();
+                            } else {
+                              canvasRef.setBackgroundColor(asset.colorPalette?.primary || "#ffffff", () => canvasRef.renderAll());
                             }
                           }}
-                          title="Primary Brand Color"
+                          title="Primary Brand Color (applies to selected object or canvas background)"
                         />
                         <div 
                           className="w-7 h-7 rounded border border-purple-200 cursor-pointer hover:scale-105 transition shadow-sm" 
                           style={{ backgroundColor: asset.colorPalette.secondary }}
                           onClick={() => {
-                            if (canvasRef && selectedObject) {
+                            if (!canvasRef) return;
+                            if (selectedObject) {
                               selectedObject.set("fill", asset.colorPalette?.secondary);
                               canvasRef.renderAll();
+                            } else {
+                              canvasRef.setBackgroundColor(asset.colorPalette?.secondary || "#ffffff", () => canvasRef.renderAll());
                             }
                           }}
-                          title="Secondary Brand Color"
+                          title="Secondary Brand Color (applies to selected object or canvas background)"
                         />
                         <div 
                           className="w-7 h-7 rounded border border-purple-200 cursor-pointer hover:scale-105 transition shadow-sm" 
                           style={{ backgroundColor: asset.colorPalette.accent }}
                           onClick={() => {
-                            if (canvasRef && selectedObject) {
+                            if (!canvasRef) return;
+                            if (selectedObject) {
                               selectedObject.set("fill", asset.colorPalette?.accent);
                               canvasRef.renderAll();
+                            } else {
+                              canvasRef.setBackgroundColor(asset.colorPalette?.accent || "#ffffff", () => canvasRef.renderAll());
                             }
                           }}
-                          title="Brand Accent Color"
+                          title="Brand Accent Color (applies to selected object or canvas background)"
                         />
                       </div>
                     </div>
@@ -922,15 +1213,33 @@ export const DesignStudioPage: React.FC = () => {
                       <p className="text-[10px] text-slate-400 font-semibold uppercase">Fonts</p>
                       <div className="space-y-1">
                         <button
-                          onClick={() => addText("Brand Title", asset.typography?.headings, 48)}
+                          onClick={() => {
+                            if (!canvasRef) return;
+                            if (selectedObject && selectedObject.type === "i-text") {
+                              (selectedObject as any).set("fontFamily", asset.typography?.headings);
+                              canvasRef.renderAll();
+                            } else {
+                              addText("Brand Title", asset.typography?.headings, 48);
+                            }
+                          }}
                           className="w-full text-left bg-white hover:bg-purple-50 border border-purple-100 px-3 py-1.5 rounded text-xs font-medium truncate flex justify-between items-center text-slate-700"
+                          title="Apply heading font to selected text, or add new text block"
                         >
                           <span>Headings: {asset.typography.headings}</span>
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => addText("Brand body text...", asset.typography?.body, 32)}
+                          onClick={() => {
+                            if (!canvasRef) return;
+                            if (selectedObject && selectedObject.type === "i-text") {
+                              (selectedObject as any).set("fontFamily", asset.typography?.body);
+                              canvasRef.renderAll();
+                            } else {
+                              addText("Brand body text...", asset.typography?.body, 32);
+                            }
+                          }}
                           className="w-full text-left bg-white hover:bg-purple-50 border border-purple-100 px-3 py-1.5 rounded text-xs font-medium truncate flex justify-between items-center text-slate-700"
+                          title="Apply body font to selected text, or add new text block"
                         >
                           <span>Body: {asset.typography.body}</span>
                           <Plus className="w-3.5 h-3.5" />
@@ -1151,15 +1460,35 @@ export const DesignStudioPage: React.FC = () => {
           <div className="h-12 bg-white border-b border-purple-100 flex items-center justify-between px-6 z-10 shadow-sm">
             <div className="flex items-center space-x-4">
               <button
-                onClick={undo}
-                className="p-1.5 text-slate-500 hover:text-purple-750 rounded hover:bg-purple-50 transition"
+                onClick={() => {
+                  const state = undo();
+                  if (state && canvasRef) {
+                    isHistoryChangingRef.current = true;
+                    canvasRef.loadFromJSON(JSON.parse(state), () => {
+                      canvasRef.renderAll();
+                      isHistoryChangingRef.current = false;
+                    });
+                  }
+                }}
+                disabled={historyIndex <= 0}
+                className="p-1.5 text-slate-500 hover:text-purple-750 rounded hover:bg-purple-50 transition disabled:opacity-30 disabled:hover:bg-transparent"
                 title="Undo (Ctrl+Z)"
               >
                 <Undo className="w-4 h-4" />
               </button>
               <button
-                onClick={redo}
-                className="p-1.5 text-slate-500 hover:text-purple-750 rounded hover:bg-purple-50 transition"
+                onClick={() => {
+                  const state = redo();
+                  if (state && canvasRef) {
+                    isHistoryChangingRef.current = true;
+                    canvasRef.loadFromJSON(JSON.parse(state), () => {
+                      canvasRef.renderAll();
+                      isHistoryChangingRef.current = false;
+                    });
+                  }
+                }}
+                disabled={historyIndex >= history.length - 1}
+                className="p-1.5 text-slate-500 hover:text-purple-750 rounded hover:bg-purple-50 transition disabled:opacity-30 disabled:hover:bg-transparent"
                 title="Redo (Ctrl+Y)"
               >
                 <Redo className="w-4 h-4" />
@@ -1229,10 +1558,38 @@ export const DesignStudioPage: React.FC = () => {
               </div>
             )}
 
-            {/* Zoom scale info */}
-            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500">
-              <span>Scale:</span>
-              <span className="text-purple-650">{Math.round(zoom * 100)}%</span>
+            {/* Right side controls (Canvas Size & Zoom) */}
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3 bg-slate-50 px-3 py-1 rounded-lg border border-slate-200 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">Canvas:</span>
+                
+                <div className="flex items-center space-x-1">
+                  <span className="text-[10px] text-slate-400">W</span>
+                  <input
+                    type="number"
+                    value={canvasWidth}
+                    onChange={(e) => setDimensions(Number(e.target.value) || 100, canvasHeight)}
+                    className="w-14 bg-white border border-slate-200 text-slate-700 text-[11px] font-bold px-1.5 py-0.5 rounded text-center focus:outline-none focus:border-purple-400"
+                    title="Canvas Width"
+                  />
+                </div>
+                <div className="flex items-center space-x-1">
+                  <span className="text-[10px] text-slate-400">H</span>
+                  <input
+                    type="number"
+                    value={canvasHeight}
+                    onChange={(e) => setDimensions(canvasWidth, Number(e.target.value) || 100)}
+                    className="w-14 bg-white border border-slate-200 text-slate-700 text-[11px] font-bold px-1.5 py-0.5 rounded text-center focus:outline-none focus:border-purple-400"
+                    title="Canvas Height"
+                  />
+                </div>
+              </div>
+
+              {/* Zoom scale info */}
+              <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500">
+                <span>Scale:</span>
+                <span className="text-purple-650">{Math.round(zoom * 100)}%</span>
+              </div>
             </div>
           </div>
 
