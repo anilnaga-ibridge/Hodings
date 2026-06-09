@@ -12,7 +12,7 @@ An enterprise-grade Out-of-Home (OOH & DOOH) media buying platform.
 ---
 
 ## Workspace Structure
-- `/backend`: Unified Next.js project containing both the React Frontend (App Router client pages) and API routes (server logic).
+- `/web`: Unified Next.js project containing both the React Frontend (App Router client pages) and API routes (server logic).
 - `/artifacts`: Software design, database schemas, and product requirement documents.
 
 ---
@@ -20,7 +20,7 @@ An enterprise-grade Out-of-Home (OOH & DOOH) media buying platform.
 ## Getting Started
 
 ### 1. Database Configuration
-In the `backend/` directory, set your PostgreSQL connection string and secrets in the `.env` file:
+In the `web/` directory, set your PostgreSQL connection string and secrets in the `.env` file:
 ```env
 DATABASE_URL="postgresql://user:password@localhost:5432/billboard_db?schema=public"
 JWT_ACCESS_SECRET="your-super-secret-access-key-goes-here-with-high-entropy"
@@ -29,13 +29,13 @@ JWT_REFRESH_SECRET="your-super-secret-refresh-key-goes-here-with-high-entropy"
 
 Then execute migrations to instantiate tables:
 ```bash
-cd backend
+cd web
 npx prisma db push
 ```
 
 ### 2. Running the Unified Web App (Next.js)
 ```bash
-cd backend
+cd web
 npm run dev
 ```
 Starts the unified development server at `http://localhost:3000`.

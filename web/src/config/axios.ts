@@ -1,6 +1,6 @@
 import axios from "axios";
 
-// Using path or proxy for backend Next.js server (assumed port 3000)
+// Using path or proxy for web Next.js server (assumed port 3000)
 export const api = axios.create({
   baseURL: typeof window !== "undefined" ? "/api/v1" : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api/v1"),
   withCredentials: true,
