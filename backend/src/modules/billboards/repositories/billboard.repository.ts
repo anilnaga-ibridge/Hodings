@@ -95,80 +95,87 @@ export class BillboardRepository {
     const skip = (page - 1) * limit;
 
     if (await this.isDbOnline()) {
-      // Build Prisma query dynamic conditions
-      const where: Prisma.BillboardWhereInput = {};
+      // Check if the entire database is completely empty (fresh setup)
+      const absoluteTotal = await prisma.billboard.count();
+      
+      // Only execute live DB search if there are actually records in the DB.
+      // Otherwise, gracefully fall through to the mock data engine for the UI demo.
+      if (absoluteTotal > 0) {
+        // Build Prisma query dynamic conditions
+        const where: Prisma.BillboardWhereInput = {};
 
-      if (keyword) {
-        where.OR = [
-          { name: { contains: keyword, mode: "insensitive" } },
-          { description: { contains: keyword, mode: "insensitive" } },
-          { address: { contains: keyword, mode: "insensitive" } },
-        ];
-      }
+        if (keyword) {
+          where.OR = [
+            { name: { contains: keyword, mode: "insensitive" } },
+            { description: { contains: keyword, mode: "insensitive" } },
+            { address: { contains: keyword, mode: "insensitive" } },
+          ];
+        }
 
-      if (city) where.city = { equals: city, mode: "insensitive" };
-      if (state) where.state = { equals: state, mode: "insensitive" };
-      if (country) where.country = { equals: country, mode: "insensitive" };
-      if (minPrice !== undefined) where.basePrice = { gte: minPrice };
-      if (maxPrice !== undefined) where.basePrice = { ...((where.basePrice as any) || {}), lte: maxPrice };
+        if (city && city !== "ALL") where.city = { equals: city, mode: "insensitive" };
+        if (state) where.state = { equals: state, mode: "insensitive" };
+        if (country) where.country = { equals: country, mode: "insensitive" };
+        if (minPrice !== undefined) where.basePrice = { gte: minPrice };
+        if (maxPrice !== undefined) where.basePrice = { ...((where.basePrice as any) || {}), lte: maxPrice };
 
-      if (category) {
-        where.category = { name: { equals: category, mode: "insensitive" } };
-      }
+        if (category && category !== "ALL") {
+          where.category = { name: { equals: category, mode: "insensitive" } };
+        }
 
-      // Filter by availability dates
-      if (availableFrom || availableTo) {
-        const fromDate = availableFrom ? new Date(availableFrom) : new Date();
-        const toDate = availableTo ? new Date(availableTo) : fromDate;
+        // Filter by availability dates
+        if (availableFrom || availableTo) {
+          const fromDate = availableFrom ? new Date(availableFrom) : new Date();
+          const toDate = availableTo ? new Date(availableTo) : fromDate;
 
-        where.availability = {
-          none: {
-            date: {
-              gte: fromDate,
-              lte: toDate,
+          where.availability = {
+            none: {
+              date: {
+                gte: fromDate,
+                lte: toDate,
+              },
+              isAvailable: false,
             },
-            isAvailable: false,
-          },
+          };
+        }
+
+        let orderBy: Prisma.BillboardOrderByWithRelationInput = { createdAt: "desc" };
+        if (sortBy === "popular") orderBy = { views: "desc" };
+        else if (sortBy === "price_low") orderBy = { basePrice: "asc" };
+        else if (sortBy === "price_high") orderBy = { basePrice: "desc" };
+        else if (sortBy === "rating") orderBy = { rating: "desc" };
+
+        const total = await prisma.billboard.count({ where });
+        let billboards = await prisma.billboard.findMany({
+          where,
+          orderBy,
+          include: { media: true },
+        });
+
+        // Implement manual Haversine distance filtering if latitude/longitude & radius are provided
+        let mappedBillboards = billboards as any[];
+        if (latitude !== undefined && longitude !== undefined) {
+          mappedBillboards = mappedBillboards
+            .map((b) => {
+              const distance = calculateDistance(latitude, longitude, b.latitude, b.longitude);
+              return { ...b, distanceKm: distance };
+            })
+            .filter((b) => (radius !== undefined ? b.distanceKm <= radius : true));
+
+          // Sort by distance if nearest
+          if (sortBy === "newest") {
+            mappedBillboards.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
+          }
+        }
+
+        const paginatedData = mappedBillboards.slice(skip, skip + limit);
+
+        return {
+          billboards: paginatedData,
+          total: total,
+          page,
+          pages: Math.ceil(total / limit),
         };
       }
-
-      let orderBy: Prisma.BillboardOrderByWithRelationInput = { createdAt: "desc" };
-      if (sortBy === "popular") orderBy = { views: "desc" };
-      else if (sortBy === "price_low") orderBy = { basePrice: "asc" };
-      else if (sortBy === "price_high") orderBy = { basePrice: "desc" };
-      else if (sortBy === "rating") orderBy = { rating: "desc" };
-
-      const total = await prisma.billboard.count({ where });
-      let billboards = await prisma.billboard.findMany({
-        where,
-        orderBy,
-        include: { media: true },
-      });
-
-      // Implement manual Haversine distance filtering if latitude/longitude & radius are provided
-      let mappedBillboards = billboards as any[];
-      if (latitude !== undefined && longitude !== undefined) {
-        mappedBillboards = mappedBillboards
-          .map((b) => {
-            const distance = calculateDistance(latitude, longitude, b.latitude, b.longitude);
-            return { ...b, distanceKm: distance };
-          })
-          .filter((b) => (radius !== undefined ? b.distanceKm <= radius : true));
-
-        // Sort by distance if nearest
-        if (sortBy === "newest") {
-          mappedBillboards.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
-        }
-      }
-
-      const paginatedData = mappedBillboards.slice(skip, skip + limit);
-
-      return {
-        billboards: paginatedData,
-        total: total,
-        page,
-        pages: Math.ceil(total / limit),
-      };
     }
 
     // Mock Database Search Logic
