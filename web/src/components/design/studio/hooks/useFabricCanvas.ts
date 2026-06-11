@@ -2,6 +2,59 @@ import { useEffect, useRef, useState } from "react";
 import { fabric } from "fabric";
 import { useDesignStudioStore } from "../stores/designStudio.store";
 import { EditorLayer } from "../types/layer.types";
+import { SmartGuides } from "../canvas/SmartGuides";
+
+// Patch fabric.util.stylesToArray to prevent TypeError when styles is undefined
+const util = fabric.util as any;
+if (fabric && util && !util.stylesToArray?.__patched) {
+  const originalStylesToArray = util.stylesToArray;
+  if (originalStylesToArray) {
+    util.stylesToArray = function (styles: any, text: string) {
+      if (!styles) {
+        return [];
+      }
+      return originalStylesToArray.call(this, styles, text);
+    };
+    util.stylesToArray.__patched = true;
+  }
+}
+
+// Patch fabric IText.prototype.removeStyleFromTo to guard against undefined
+// _unwrappedTextLines entries. When text is typed or deleted rapidly, the
+// _unwrappedTextLines array can lag behind styles, causing:
+//   TypeError: Cannot read properties of undefined (reading '0')
+// at klass.removeStyleFromTo (fabric.js:~23370)
+// called by klass.onInput (fabric.js:~24004)
+const iTextProto = (fabric.IText as any).prototype;
+if (iTextProto && !iTextProto.removeStyleFromTo?.__patched) {
+  const originalRemoveStyleFromTo = iTextProto.removeStyleFromTo;
+  iTextProto.removeStyleFromTo = function (start: number, end: number) {
+    // Ensure _unwrappedTextLines is populated before delegating.
+    // If it's missing or empty, re-generate it so the original function
+    // has the data it needs.
+    if (!this._unwrappedTextLines || this._unwrappedTextLines.length === 0) {
+      if (typeof this._splitTextIntoLines === "function") {
+        try {
+          this._unwrappedTextLines = this._splitTextIntoLines(this.text || "").lines;
+        } catch (_) {
+          // If even that fails, bail out gracefully rather than crash.
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+    try {
+      originalRemoveStyleFromTo.call(this, start, end);
+    } catch (err) {
+      // Swallow the error so the text object stays interactive.
+      // The style data may be slightly inconsistent for one frame but
+      // Fabric will self-heal on the next render/input cycle.
+      console.warn("[fabric patch] removeStyleFromTo swallowed error:", err);
+    }
+  };
+  iTextProto.removeStyleFromTo.__patched = true;
+}
 
 interface UseFabricCanvasProps {
   canvasEl: HTMLCanvasElement | null;
@@ -56,6 +109,47 @@ export const useFabricCanvas = ({
 
     setCanvas(fabricCanvas);
 
+    // Prevent browser default zoom and scroll behaviors, and perform pan & zoom relative to workspace container
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      const isZoomEvent = e.ctrlKey || e.metaKey;
+      const currentZoom = useDesignStudioStore.getState().zoom;
+      const currentPanX = useDesignStudioStore.getState().panX;
+      const currentPanY = useDesignStudioStore.getState().panY;
+
+      if (isZoomEvent) {
+        // Zoom (dampened exponential zoom curve adjusted for trackpad pinch vs mouse wheel)
+        const delta = e.deltaY;
+        let factor = 0.002;
+        if (Math.abs(delta) < 20) {
+          factor = 0.01; // higher sensitivity for trackpad pinch
+        }
+        
+        let targetZoom = currentZoom * Math.exp(-delta * factor);
+        
+        // Bound between 10% and 500%
+        if (targetZoom > 5.0) targetZoom = 5.0;
+        if (targetZoom < 0.1) targetZoom = 0.1;
+        
+        // Zoom to point under cursor relative to container
+        const rect = containerEl.getBoundingClientRect();
+        const rulerOffset = useDesignStudioStore.getState().showRulers ? 20 : 0;
+        const mouseX = e.clientX - rect.left - rulerOffset;
+        const mouseY = e.clientY - rect.top - rulerOffset;
+        
+        const newPanX = mouseX - (mouseX - currentPanX) * (targetZoom / currentZoom);
+        const newPanY = mouseY - (mouseY - currentPanY) * (targetZoom / currentZoom);
+        
+        setZoom(targetZoom);
+        setPan(newPanX, newPanY);
+      } else {
+        // Scroll panning
+        setPan(currentPanX - e.deltaX, currentPanY - e.deltaY);
+      }
+    };
+    containerEl.addEventListener("wheel", handleNativeWheel, { passive: false });
+
     // Setup initial scale & positioning (center within viewport)
     const cw = containerEl.clientWidth;
     const ch = containerEl.clientHeight;
@@ -69,8 +163,6 @@ export const useFabricCanvas = ({
     setZoom(initialScale);
     setPan(centerPanX, centerPanY);
 
-    fabricCanvas.setZoom(initialScale);
-    fabricCanvas.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
     fabricCanvas.renderAll();
 
     // Panning State variables
@@ -95,7 +187,7 @@ export const useFabricCanvas = ({
       // Pan if holding Spacebar (handMode), Alt/Shift, or middle mouse click (which is button === 1)
       const isMiddleClick = (evt as MouseEvent).button === 1;
       
-      if (handModeRef.current || evt.altKey || evt.shiftKey || isMiddleClick || opt.target === null) {
+      if (handModeRef.current || evt.altKey || evt.shiftKey || isMiddleClick) {
         isDragging = true;
         fabricCanvas.selection = false;
         lastX = evt.clientX || (evt as any).touches?.[0]?.clientX;
@@ -108,45 +200,20 @@ export const useFabricCanvas = ({
         const evt = opt.e;
         const currentX = evt.clientX || (evt as any).touches?.[0]?.clientX;
         const currentY = evt.clientY || (evt as any).touches?.[0]?.clientY;
-        fabricCanvas.relativePan(new fabric.Point(currentX - lastX, currentY - lastY));
         
-        const vpt = fabricCanvas.viewportTransform;
-        if (vpt) {
-          setPan(vpt[4], vpt[5]);
-        }
+        const deltaX = currentX - lastX;
+        const deltaY = currentY - lastY;
+        
+        const currentPanX = useDesignStudioStore.getState().panX;
+        const currentPanY = useDesignStudioStore.getState().panY;
+        setPan(currentPanX + deltaX, currentPanY + deltaY);
         
         lastX = currentX;
         lastY = currentY;
       }
     });
 
-    // Zoom on wheel (Ctrl + Wheel zooms, standard Wheel scrolls)
-    fabricCanvas.on("mouse:wheel", (opt) => {
-      opt.e.preventDefault();
-      opt.e.stopPropagation();
-
-      const evt = opt.e;
-      const isZoomEvent = evt.ctrlKey || evt.metaKey;
-
-      if (isZoomEvent) {
-        // Zoom
-        let targetZoom = fabricCanvas.getZoom() * 0.999 ** evt.deltaY;
-        // Bound between 10% and 500%
-        if (targetZoom > 5.0) targetZoom = 5.0;
-        if (targetZoom < 0.1) targetZoom = 0.1;
-        
-        fabricCanvas.zoomToPoint({ x: evt.offsetX, y: evt.offsetY }, targetZoom);
-        setZoom(targetZoom);
-      } else {
-        // Scroll panning
-        fabricCanvas.relativePan(new fabric.Point(-evt.deltaX, -evt.deltaY));
-      }
-
-      const vpt = fabricCanvas.viewportTransform;
-      if (vpt) {
-        setPan(vpt[4], vpt[5]);
-      }
-    });
+    // Zoom and pan are handled natively above to support zooming and panning outside the canvas sheet bounds
 
     // Snapping Grid & Smart Guides
     fabricCanvas.on("object:moving", (options) => {
@@ -155,14 +222,12 @@ export const useFabricCanvas = ({
       
       const snapObjects = useDesignStudioStore.getState().snapToObjects;
       if (snapObjects) {
-        import("../canvas/SmartGuides").then(({ SmartGuides }) => {
-          SmartGuides.alignMovingObject(
-            fabricCanvas,
-            target,
-            canvasWidthRef.current,
-            canvasHeightRef.current
-          );
-        });
+        SmartGuides.alignMovingObject(
+          fabricCanvas,
+          target,
+          canvasWidthRef.current,
+          canvasHeightRef.current
+        );
       } else {
         const snapGrid = useDesignStudioStore.getState().snapToGrid;
         if (snapGrid) {
@@ -178,9 +243,7 @@ export const useFabricCanvas = ({
     fabricCanvas.on("mouse:up", () => {
       isDragging = false;
       fabricCanvas.selection = true;
-      import("../canvas/SmartGuides").then(({ SmartGuides }) => {
-        SmartGuides.clear(fabricCanvas);
-      });
+      SmartGuides.clear(fabricCanvas);
     });
 
     // Sync layers structure on changes
@@ -201,21 +264,41 @@ export const useFabricCanvas = ({
       setLayers(currentLayers);
     };
 
+    const syncHistory = () => {
+      const isSaving = useDesignStudioStore.getState().isSaving;
+      if (isSaving) return;
+      const json = JSON.stringify(fabricCanvas.toJSON());
+      useDesignStudioStore.getState().setIsDirty(true);
+      useDesignStudioStore.getState().saveHistoryState(json);
+    };
+
     fabricCanvas.on("object:added", (e) => {
       const obj = e.target;
       if (obj && !(obj as any).id) {
         (obj as any).id = `elem_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       }
       syncLayers();
+      if (!obj || !(obj as any).isCanvasBackground) {
+        syncHistory();
+      }
     });
 
-    fabricCanvas.on("object:removed", syncLayers);
-    fabricCanvas.on("object:modified", syncLayers);
+    fabricCanvas.on("object:removed", () => {
+      syncLayers();
+      syncHistory();
+    });
+    
+    fabricCanvas.on("object:modified", () => {
+      syncLayers();
+      syncHistory();
+    });
+    
     fabricCanvas.on("selection:cleared", syncLayers);
     fabricCanvas.on("selection:created", syncLayers);
     fabricCanvas.on("selection:updated", syncLayers);
 
     return () => {
+      containerEl.removeEventListener("wheel", handleNativeWheel);
       fabricCanvas.dispose();
       setCanvas(null);
     };
@@ -224,7 +307,7 @@ export const useFabricCanvas = ({
 
   // Handle outside size changes
   useEffect(() => {
-    if (!canvas) return;
+    if (!canvas || !(canvas as any).contextContainer) return;
     canvas.setWidth(canvasWidth);
     canvas.setHeight(canvasHeight);
     canvas.renderAll();

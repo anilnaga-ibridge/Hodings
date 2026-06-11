@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { CanvasElement, ZoomSettings, WorkspaceConfig } from "../types/canvas.types";
 import { EditorLayer } from "../types/layer.types";
 
+export type CanvasTool = "select" | "hand" | "text" | "rect" | "circle" | "line" | "pen" | "crop";
+
 interface DesignStudioState {
   // Canvas Size
   canvasWidth: number;
@@ -20,6 +22,9 @@ interface DesignStudioState {
   snapToObjects: boolean;
   showRulers: boolean;
   showGrid: boolean;
+  
+  // Active Tool
+  activeTool: CanvasTool;
   
   // Elements & Selection
   elements: CanvasElement[];
@@ -53,6 +58,7 @@ interface DesignStudioState {
   setSnapToObjects: (active: boolean) => void;
   setShowRulers: (active: boolean) => void;
   setShowGrid: (active: boolean) => void;
+  setActiveTool: (tool: CanvasTool) => void;
   
   setElements: (elements: CanvasElement[]) => void;
   setLayers: (layers: EditorLayer[]) => void;
@@ -74,6 +80,7 @@ interface DesignStudioState {
   clearStoreState: () => void;
 }
 
+
 export const useDesignStudioStore = create<DesignStudioState>((set, get) => ({
   canvasWidth: 1920,
   canvasHeight: 1080,
@@ -89,6 +96,7 @@ export const useDesignStudioStore = create<DesignStudioState>((set, get) => ({
   snapToObjects: true,
   showRulers: true,
   showGrid: false,
+  activeTool: "select" as CanvasTool,
   
   elements: [],
   activeElementId: null,
@@ -121,6 +129,7 @@ export const useDesignStudioStore = create<DesignStudioState>((set, get) => ({
   setSnapToObjects: (active) => set({ snapToObjects: active }),
   setShowRulers: (active) => set({ showRulers: active }),
   setShowGrid: (active) => set({ showGrid: active }),
+  setActiveTool: (tool) => set({ activeTool: tool, handMode: tool === "hand" }),
   
   setElements: (elements) => set({ elements }),
   setLayers: (layers) => set({ layers }),

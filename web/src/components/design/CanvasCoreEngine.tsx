@@ -12,7 +12,52 @@ if (utilAny && utilAny.stylesToArray) {
     return originalStylesToArray(styles || {}, text || "");
   };
 }
+
+// Prevents `Cannot read properties of undefined (reading '0')` in
+// `removeStyleFromTo` when _unwrappedTextLines lags behind styles during rapid
+// typing/deletion inside an IText or Textbox object.
+const iTextAny = (fabric.IText as any).prototype;
+if (iTextAny && !iTextAny.removeStyleFromTo?.__patched) {
+  const origRemove = iTextAny.removeStyleFromTo;
+  iTextAny.removeStyleFromTo = function (start: number, end: number) {
+    if (!this._unwrappedTextLines || this._unwrappedTextLines.length === 0) {
+      if (typeof this._splitTextIntoLines === "function") {
+        try {
+          this._unwrappedTextLines = this._splitTextIntoLines(this.text || "").lines;
+        } catch (_) {
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+    try {
+      if (!this.styles) {
+        this.styles = {};
+      }
+      const originalStyles = this.styles;
+      const proxyStyles = new Proxy(originalStyles, {
+        get(target, prop) {
+          if (typeof prop === "string" && !isNaN(Number(prop)) && !target[prop]) {
+            return {};
+          }
+          return Reflect.get(target, prop);
+        }
+      });
+      this.styles = proxyStyles;
+      try {
+        origRemove.call(this, start, end);
+      } finally {
+        this.styles = originalStyles;
+      }
+    } catch (err) {
+      // Quietly swallow standard Fabric style index mismatches during rapid edits
+    }
+  };
+  iTextAny.removeStyleFromTo.__patched = true;
+}
 // -----------------------------
+
 
 interface CanvasCoreEngineProps {
   initialCanvasJson?: string;
@@ -30,6 +75,9 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
   onCanvasReadyRef.current = onCanvasReady;
 
   const {
+    zoom,
+    panX,
+    panY,
     setZoom,
     setPan,
     snapToGrid,
@@ -63,6 +111,45 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
 
     fabricRef.current = fabricCanvas;
 
+    const container = containerRef.current;
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      const isZoomEvent = e.ctrlKey || e.metaKey;
+      const currentZoom = useEditorStore.getState().zoom;
+      const currentPanX = useEditorStore.getState().panX;
+      const currentPanY = useEditorStore.getState().panY;
+
+      if (isZoomEvent) {
+        // Zoom (dampened exponential zoom curve adjusted for trackpad pinch vs mouse wheel)
+        const delta = e.deltaY;
+        let factor = 0.002;
+        if (Math.abs(delta) < 20) {
+          factor = 0.01; // higher sensitivity for trackpad pinch
+        }
+        
+        let targetZoom = currentZoom * Math.exp(-delta * factor);
+        
+        // Bound between 5% and 2000%
+        if (targetZoom > 20) targetZoom = 20;
+        if (targetZoom < 0.05) targetZoom = 0.05;
+        
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const newPanX = mouseX - (mouseX - currentPanX) * (targetZoom / currentZoom);
+        const newPanY = mouseY - (mouseY - currentPanY) * (targetZoom / currentZoom);
+        
+        setZoom(targetZoom);
+        setPan(newPanX, newPanY);
+      } else {
+        // Scroll panning
+        setPan(currentPanX - e.deltaX, currentPanY - e.deltaY);
+      }
+    };
+    container.addEventListener("wheel", handleNativeWheel, { passive: false });
+
     if (onCanvasReadyRef.current) {
       onCanvasReadyRef.current(fabricCanvas);
     }
@@ -92,8 +179,7 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
     setZoom(initialScale);
     setPan(centerPanX, centerPanY);
 
-    fabricCanvas.setZoom(initialScale);
-    fabricCanvas.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
+    fabricCanvas.renderAll();
 
     // ── Pan & Zoom via Mouse ──
     let isDragging = false;
@@ -115,9 +201,14 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
         const evt = opt.e;
         const currentX = evt.clientX || (evt as any).touches?.[0]?.clientX;
         const currentY = evt.clientY || (evt as any).touches?.[0]?.clientY;
-        fabricCanvas.relativePan(new fabric.Point(currentX - lastX, currentY - lastY));
-        const vpt = fabricCanvas.viewportTransform;
-        if (vpt) setPan(vpt[4], vpt[5]);
+        
+        const deltaX = currentX - lastX;
+        const deltaY = currentY - lastY;
+        
+        const currentPanX = useEditorStore.getState().panX;
+        const currentPanY = useEditorStore.getState().panY;
+        setPan(currentPanX + deltaX, currentPanY + deltaY);
+        
         lastX = currentX;
         lastY = currentY;
       }
@@ -128,18 +219,7 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
       fabricCanvas.selection = true;
     });
 
-    // Zoom on wheel
-    fabricCanvas.on("mouse:wheel", (opt) => {
-      let targetZoom = fabricCanvas.getZoom() * 0.999 ** opt.e.deltaY;
-      if (targetZoom > 20) targetZoom = 20;
-      if (targetZoom < 0.05) targetZoom = 0.05;
-      fabricCanvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, targetZoom);
-      setZoom(targetZoom);
-      const vpt = fabricCanvas.viewportTransform;
-      if (vpt) setPan(vpt[4], vpt[5]);
-      opt.e.preventDefault();
-      opt.e.stopPropagation();
-    });
+    // Zoom and pan are handled natively above to support zooming and panning outside the canvas sheet bounds
 
     // Snap to grid (reads from ref so the effect doesn't need snapToGrid as a dep)
     fabricCanvas.on("object:moving", (options) => {
@@ -157,6 +237,7 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
     window.addEventListener("resize", handleResize);
 
     return () => {
+      container.removeEventListener("wheel", handleNativeWheel);
       window.removeEventListener("resize", handleResize);
       fabricCanvas.dispose();
       fabricRef.current = null;
@@ -181,8 +262,6 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
       setZoom(initialScale);
       setPan(centerPanX, centerPanY);
 
-      fabricRef.current.setZoom(initialScale);
-      fabricRef.current.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
       fabricRef.current.renderAll();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,12 +280,13 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
 
     try {
       const data = JSON.parse(dataStr);
-      const rect = canvas.getElement().getBoundingClientRect();
-      const vpt = canvas.viewportTransform;
-      if (!vpt) return;
+      const canvasEl = canvas.getElement();
+      if (!canvasEl) return;
+      const rect = canvasEl.getBoundingClientRect();
+      const currentZoom = useEditorStore.getState().zoom;
 
-      const canvasX = (e.clientX - rect.left - vpt[4]) / vpt[0];
-      const canvasY = (e.clientY - rect.top - vpt[5]) / vpt[3];
+      const canvasX = (e.clientX - rect.left) / currentZoom;
+      const canvasY = (e.clientY - rect.top) / currentZoom;
 
       let obj: fabric.Object | null = null;
 
@@ -231,13 +311,14 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
           fill: data.fill || "#10B981",
         });
       } else if (data.type === "image" && data.src) {
+        const isDataOrBlob = data.src.startsWith("data:") || data.src.startsWith("blob:");
         fabric.Image.fromURL(data.src, (img) => {
           img.set({ left: canvasX, top: canvasY });
           img.scaleToWidth(data.width || 300);
           canvas.add(img);
           canvas.setActiveObject(img);
           canvas.renderAll();
-        }, { crossOrigin: "anonymous" });
+        }, isDataOrBlob ? {} : { crossOrigin: "anonymous" });
         return;
       }
 
@@ -259,7 +340,17 @@ export const CanvasCoreEngine: React.FC<CanvasCoreEngineProps> = ({
       onDrop={handleDrop}
     >
       <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:40px_40px]"></div>
-      <div className="shadow-2xl border border-slate-300 overflow-hidden bg-white">
+      <div
+        className="absolute shadow-2xl border border-slate-300 overflow-hidden bg-white"
+        style={{
+          width: `${canvasWidth}px`,
+          height: `${canvasHeight}px`,
+          transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+          transformOrigin: "0 0",
+          left: "0px",
+          top: "0px",
+        }}
+      >
         <canvas ref={canvasElRef} />
       </div>
     </div>

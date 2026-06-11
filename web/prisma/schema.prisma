@@ -143,6 +143,7 @@ model User {
 
   profile          Profile?
   brandAssets      BrandAsset[]
+  brandKits        BrandKit[]
   billboards       Billboard[]   @relation("OwnerBillboards")
   campaigns        Campaign[]
   bookings         Booking[]
@@ -157,6 +158,8 @@ model User {
   workspaces       TeamMember[]
   designs          Design[]
   comments         Comment[]
+  assets           Asset[]       @relation("UserAssets")
+  assetFolders     AssetFolder[] @relation("UserFolders")
 }
 
 model Profile {
@@ -194,6 +197,8 @@ model BrandAsset {
   height       Int?
   tags         String[]
   version      Int        @default(1)
+  brandKitId   String?
+  brandKit     BrandKit?  @relation("BrandKitAssets", fields: [brandKitId], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 }
@@ -206,6 +211,7 @@ model Workspace {
   folders     Folder[]
   designs     Design[]
   brandAssets BrandAsset[]
+  brandKits   BrandKit[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -519,4 +525,142 @@ model AuditLog {
   userAgent String?
   payload   Json?
   createdAt DateTime @default(now())
+}
+
+model BrandKit {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId    String?
+  workspace      Workspace?      @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name           String
+  description    String?
+  website        String?
+  tagline        String?
+  industry       String?
+  logoPrimary    String?
+  logoSecondary  String?
+  logoIcon       String?
+  logoWhite      String?
+  logoDark       String?
+  logoHorizontal String?
+  logoVertical   String?
+  favicon        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  colors         BrandColor[]
+  fonts          BrandFont[]
+  gradients      BrandGradient[]
+  assets         BrandAsset[]    @relation("BrandKitAssets")
+  templates      BrandTemplate[]
+  voice          BrandVoice?
+}
+
+model BrandColor {
+  id         String   @id @default(uuid())
+  brandKitId String
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  type       String   // "PRIMARY", "SECONDARY", "ACCENT", "NEUTRAL", "SUCCESS", "WARNING", "ERROR"
+  name       String
+  hex        String
+  rgb        String
+  hsl        String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model BrandFont {
+  id            String   @id @default(uuid())
+  brandKitId    String
+  brandKit      BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  type          String   // "HEADING", "SUBHEADING", "BODY", "CAPTION"
+  fontFamily    String
+  weight        String   @default("400")
+  sizeScale     Int      // e.g. 48 for H1, 16 for Body
+  lineHeight    Float    @default(1.2)
+  letterSpacing Float    @default(0.0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model BrandGradient {
+  id         String   @id @default(uuid())
+  brandKitId String
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  name       String
+  stops      Json     // Array of { color: hex, offset: float }
+  direction  String   // e.g., "to right", "45deg"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model BrandTemplate {
+  id         String   @id @default(uuid())
+  brandKitId String
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  name       String   // e.g., "Instagram Post", "LinkedIn Post"
+  width      Int
+  height     Int
+  canvasJson String   @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model BrandVoice {
+  id           String   @id @default(uuid())
+  brandKitId   String   @unique
+  brandKit     BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  tone         String   // "Professional", "Friendly", "Luxury", "Minimalist", "Modern", etc.
+  writingStyle String
+  keywords     String[]
+  values       String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Asset {
+  id           String       @id @default(uuid())
+  name         String
+  type         String       // "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT"
+  url          String       @db.Text
+  thumbnailUrl String?      @db.Text
+  width        Int?
+  height       Int?
+  size         Int          @default(0)
+  favorite     Boolean      @default(false)
+  uploadedAt   DateTime     @default(now())
+  
+  // Relations
+  customerId   String?
+  customer     User?        @relation("UserAssets", fields: [customerId], references: [id], onDelete: Cascade)
+  
+  folderId     String?
+  folder       AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  
+  tags         AssetTag[]   @relation("AssetTags")
+  
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model AssetFolder {
+  id             String        @id @default(uuid())
+  name           String
+  parentFolderId String?
+  parentFolder   AssetFolder?  @relation("SubFolders", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  subFolders     AssetFolder[] @relation("SubFolders")
+  assets         Asset[]
+  
+  customerId     String?
+  customer       User?         @relation("UserFolders", fields: [customerId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model AssetTag {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  assets Asset[] @relation("AssetTags")
 }

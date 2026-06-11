@@ -19,22 +19,32 @@ export class ExportService {
       canvas.renderAll();
     }
 
-    const dataUrl = canvas.toDataURL({
-      format: format === "png" ? "png" : "jpeg",
-      quality: 1.0,
-      multiplier: multiplier,
-    });
+    try {
+      const dataUrl = canvas.toDataURL({
+        format: format === "png" ? "png" : "jpeg",
+        quality: 1.0,
+        multiplier: multiplier,
+      });
 
-    // Restore background color
-    if (transparentBg && format === "png") {
-      canvas.backgroundColor = originalBgColor;
-      canvas.renderAll();
+      // Restore background color
+      if (transparentBg && format === "png") {
+        canvas.backgroundColor = originalBgColor;
+        canvas.renderAll();
+      }
+
+      const link = document.createElement("a");
+      link.download = `${filename.replace(/\s+/g, "_")}.${format === "png" ? "png" : "jpg"}`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      // Restore background color on error
+      if (transparentBg && format === "png") {
+        canvas.backgroundColor = originalBgColor;
+        canvas.renderAll();
+      }
+      console.error("Canvas export failed due to tainted canvas or CORS blocks:", err);
+      alert("Failed to export canvas image. This design contains external assets or images loaded from other websites that block cross-origin access (CORS). Please remove or replace the external image to export successfully.");
     }
-
-    const link = document.createElement("a");
-    link.download = `${filename.replace(/\s+/g, "_")}.${format === "png" ? "png" : "jpg"}`;
-    link.href = dataUrl;
-    link.click();
   }
 
   /**
@@ -58,51 +68,56 @@ export class ExportService {
    * Export the canvas as PDF by printing or generating an image wrapper
    */
   public static exportAsPDF(canvas: fabric.Canvas, filename: string, width: number, height: number) {
-    // Generate high-DPI image of the canvas first
-    const dataUrl = canvas.toDataURL({
-      format: "png",
-      quality: 1.0,
-      multiplier: 2,
-    });
+    try {
+      // Generate high-DPI image of the canvas first
+      const dataUrl = canvas.toDataURL({
+        format: "png",
+        quality: 1.0,
+        multiplier: 2,
+      });
 
-    // Create a printable window or print iframe
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Please allow pop-ups to export as PDF");
-      return;
+      // Create a printable window or print iframe
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        alert("Please allow pop-ups to export as PDF");
+        return;
+      }
+
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>${filename}</title>
+            <style>
+              @page {
+                size: ${width}px ${height}px;
+                margin: 0;
+              }
+              body {
+                margin: 0;
+                padding: 0;
+                background-color: white;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                width: 100vw;
+              }
+              img {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+              }
+            </style>
+          </head>
+          <body>
+            <img src="${dataUrl}" onload="window.print();window.close();" />
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    } catch (err) {
+      console.error("Canvas PDF export failed due to tainted canvas or CORS blocks:", err);
+      alert("Failed to export canvas as PDF. This design contains external assets or images loaded from other websites that block cross-origin access (CORS). Please remove or replace the external image to export successfully.");
     }
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${filename}</title>
-          <style>
-            @page {
-              size: ${width}px ${height}px;
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              background-color: white;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              height: 100vh;
-              width: 100vw;
-            }
-            img {
-              max-width: 100%;
-              max-height: 100%;
-              object-fit: contain;
-            }
-          </style>
-        </head>
-        <body>
-          <img src="${dataUrl}" onload="window.print();window.close();" />
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
   }
 }

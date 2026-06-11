@@ -7,12 +7,19 @@ import { CanvasArea } from "../components/design/studio/canvas/CanvasArea";
 import { WorkspaceToolbar } from "../components/design/studio/toolbar/WorkspaceToolbar";
 import { FloatingToolbar } from "../components/design/studio/toolbar/FloatingToolbar";
 import { ContextMenu } from "../components/design/studio/toolbar/ContextMenu";
+import { ToolPalette } from "../components/design/studio/toolbar/ToolPalette";
+import { CropToolbar } from "../components/design/studio/toolbar/CropToolbar";
 
 // Panels
 import { TemplatesPanel } from "../components/design/studio/panels/TemplatesPanel";
 import { BrandKitPanel } from "../components/design/studio/panels/BrandKitPanel";
 import { ElementsPanel } from "../components/design/studio/panels/ElementsPanel";
 import { LayersPanel } from "../components/design/studio/panels/LayersPanel";
+import { CanvasSizePanel } from "../components/design/studio/panels/CanvasSizePanel";
+import { useSearchParams } from "next/navigation";
+import { SavedDesignsPanel, saveDesignToLocal, loadSavedDesigns } from "../components/design/studio/panels/SavedDesignsPanel";
+import { AssetManagerPanel } from "../components/design/studio/panels/AssetManagerPanel";
+import { AiStudioPanel } from "../components/design/studio/panels/AiStudioPanel";
 
 // Modals
 import { MockupModal } from "../components/design/studio/modals/MockupModal";
@@ -27,7 +34,8 @@ import { CanvasElement, TemplateType, WorkspaceConfig } from "../components/desi
 // Icons
 import { 
   Palette, Type, Folder, Layout, UploadCloud, Sparkles, 
-  FolderPlus, Layers, Eye, Download, Save, Plus, X, Search 
+  FolderPlus, Layers, Eye, Download, Save, Plus, X, Search,
+  Maximize2, BookImage, CheckCircle2,
 } from "lucide-react";
 
 export const DesignStudioPage: React.FC = () => {
@@ -42,14 +50,12 @@ export const DesignStudioPage: React.FC = () => {
   // Fabric canvas handle & Selection
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   const [selectedObject, setSelectedObject] = useState<fabric.Object | null>(null);
+  const [isCropMode, setIsCropMode] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
   
   // Modals & Panels Active state
   const [isMockupOpen, setIsMockupOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiRemoveBgUrl, setAiRemoveBgUrl] = useState("");
-  const [isAiRemoving, setIsAiRemoving] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Zustand stores mappings
@@ -70,6 +76,45 @@ export const DesignStudioPage: React.FC = () => {
 
   const { registerState } = useHistory(canvas);
   const { saveToBackendImmediate } = useAutosave(canvas);
+  const searchParams = useSearchParams();
+  const queryDesignId = searchParams?.get("designId");
+
+  // Load design on mount if designId query param is present
+  useEffect(() => {
+    if (canvas && queryDesignId) {
+      const saved = loadSavedDesigns();
+      const design = saved.find((d) => d.id === queryDesignId);
+      if (design) {
+        try {
+          canvas.loadFromJSON(JSON.parse(design.canvasJson), () => {
+            canvas.renderAll();
+            setDesignName(design.name);
+            setActiveDesignId(design.id);
+            registerState();
+          });
+        } catch (err) {
+          console.error("Failed to parse or load canvas JSON:", err);
+        }
+      }
+    }
+  }, [canvas, queryDesignId, setDesignName, setActiveDesignId, registerState]);
+
+  // Ctrl+S → save design snapshot + flash notification
+  useEffect(() => {
+    const handleCtrlS = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (canvas) {
+          saveDesignToLocal(canvas, designName, activeDesignId || undefined);
+          saveToBackendImmediate();
+          setSavedFlash(true);
+          setTimeout(() => setSavedFlash(false), 2500);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleCtrlS);
+    return () => window.removeEventListener("keydown", handleCtrlS);
+  }, [canvas, designName, activeDesignId, saveToBackendImmediate]);
 
   // Seed Mock Local/Fallback data
   const FALLBACK_WORKSPACES: WorkspaceConfig[] = [
@@ -178,6 +223,7 @@ export const DesignStudioPage: React.FC = () => {
     if (!canvas) return;
 
     const canvasEl = canvas.getElement();
+    if (!canvasEl) return;
     const rect = canvasEl.getBoundingClientRect();
     
     // Find target at clicked point
@@ -299,35 +345,6 @@ export const DesignStudioPage: React.FC = () => {
     }
   };
 
-  // AI Tools
-  const generateAiDesign = () => {
-    if (!aiPrompt) return;
-    setIsAiLoading(true);
-    setTimeout(() => {
-      setIsAiLoading(false);
-      addText(aiPrompt.toUpperCase(), "Outfit", 72);
-      setAiPrompt("");
-    }, 2000);
-  };
-
-  const removeImageBg = () => {
-    if (!aiRemoveBgUrl) return;
-    setIsAiRemoving(true);
-    setTimeout(() => {
-      setIsAiRemoving(false);
-      if (canvas) {
-        fabric.Image.fromURL(aiRemoveBgUrl, (img) => {
-          img.set({ left: 150, top: 150 });
-          img.scaleToWidth(250);
-          canvas.add(img);
-          canvas.setActiveObject(img);
-          canvas.renderAll();
-        }, { crossOrigin: "anonymous" });
-      }
-      setAiRemoveBgUrl("");
-    }, 2000);
-  };
-
   // Create workspace folder
   const handleCreateFolder = async () => {
     if (!newFolderName) return;
@@ -347,7 +364,13 @@ export const DesignStudioPage: React.FC = () => {
 
   const getCanvasDataUrl = () => {
     if (!canvas) return "https://images.unsplash.com/photo-1542241647-9cbb2225278b?q=80&w=1920";
-    return canvas.toDataURL({ format: "png", quality: 0.8 });
+    try {
+      return canvas.toDataURL({ format: "png", quality: 0.8 });
+    } catch (err) {
+      console.warn("Failed to export canvas data URL due to CORS or tainted canvas:", err);
+      // Return a beautiful purple inline SVG fallback preview image
+      return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080' viewBox='0 0 1920 1080'><rect width='100%' height='100%' fill='%237c3aed'/><text x='50%' y='50%' font-family='Outfit, sans-serif' font-size='48' font-weight='bold' fill='white' dominant-baseline='middle' text-anchor='middle'>Design Workspace Preview</text></svg>";
+    }
   };
 
   return (
@@ -372,7 +395,9 @@ export const DesignStudioPage: React.FC = () => {
             { id: "elements", label: "Elements", icon: Type },
             { id: "layers", label: "Layers", icon: Layers },
             { id: "uploads", label: "Uploads", icon: UploadCloud },
+            { id: "mydesigns", label: "My Designs", icon: BookImage },
             { id: "folders", label: "Folders", icon: Folder },
+            { id: "resize", label: "Resize", icon: Maximize2 },
             { id: "aitools", label: "AI Tools", icon: Sparkles }
           ].map((tab) => {
             const Icon = tab.icon;
@@ -393,8 +418,13 @@ export const DesignStudioPage: React.FC = () => {
           })}
         </nav>
 
+        {/* Tool Palette — vertical strip between nav and aside */}
+        <ToolPalette canvas={canvas} />
+
         {/* Tab Drawer Details */}
-        <aside className="w-80 bg-white border-r border-purple-100/80 flex flex-col z-15 relative shrink-0 p-5 overflow-y-auto space-y-6">
+        <aside className={`${
+          activeTab === "brandkit" ? "w-[420px]" : "w-80"
+        } bg-white border-r border-purple-100/80 flex flex-col z-15 relative shrink-0 p-5 transition-all duration-300 overflow-hidden h-full`}>
           
           {/* Templates Panel */}
           {activeTab === "templates" && (
@@ -407,95 +437,60 @@ export const DesignStudioPage: React.FC = () => {
 
           {/* Brand Kit Panel */}
           {activeTab === "brandkit" && (
-            <BrandKitPanel
-              canvas={canvas}
-              brandAssets={brandAssets}
-              selectedObject={selectedObject}
-            />
+            <div className="flex-1 overflow-y-auto pr-1 pb-8 space-y-6">
+              <BrandKitPanel
+                canvas={canvas}
+                brandAssets={brandAssets}
+                selectedObject={selectedObject}
+              />
+            </div>
           )}
 
           {/* Elements Panel */}
           {activeTab === "elements" && (
-            <ElementsPanel canvas={canvas} />
+            <div className="flex-1 overflow-y-auto pr-1 pb-8">
+              <ElementsPanel canvas={canvas} />
+            </div>
           )}
 
           {/* Layers Panel */}
           {activeTab === "layers" && (
-            <LayersPanel canvas={canvas} />
+            <div className="flex-1 overflow-y-auto pr-1 pb-8">
+              <LayersPanel canvas={canvas} />
+            </div>
           )}
 
-          {/* Uploads Panel */}
-          {activeTab === "uploads" && (
-            <div className="space-y-5">
-              <h3 className="font-bold text-sm text-slate-800 flex items-center space-x-1.5">
-                <UploadCloud className="w-4 h-4 text-purple-600" />
-                <span>Upload Assets</span>
-              </h3>
-              
-              <div className="border-2 border-dashed border-purple-200 hover:border-purple-500 rounded-2xl p-6 text-center cursor-pointer relative bg-slate-50 transition shadow-inner">
-                <input
-                  type="file"
-                  onChange={handleImageUpload}
-                  accept="image/*"
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-                <UploadCloud className="w-7 h-7 text-purple-550 mx-auto mb-2" />
-                <p className="text-xs font-bold text-slate-700">Click or Drag Files to Upload</p>
-                <p className="text-[9.5px] text-slate-405 mt-1">PNG, JPG, or SVG up to 10MB</p>
-              </div>
+          {/* Resize / Canvas Size Panel */}
+          {activeTab === "resize" && (
+            <CanvasSizePanel canvas={canvas} />
+          )}
 
-              <div className="space-y-2">
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Uploaded Library</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {uploadsList.map((url, idx) => (
-                    <div 
-                      key={idx}
-                      onClick={() => {
-                        if (canvas) {
-                          fabric.Image.fromURL(url, (img) => {
-                            img.set({ left: 100, top: 100 });
-                            img.scaleToWidth(300);
-                            canvas.add(img);
-                            canvas.renderAll();
-                          }, { crossOrigin: "anonymous" });
-                        }
-                      }}
-                      className="aspect-square bg-slate-100 rounded-xl overflow-hidden border border-purple-100 hover:border-purple-400 transition cursor-pointer shadow-sm"
-                    >
-                      <img src={url} alt="Uploaded block" className="w-full h-full object-cover" />
-                    </div>
-                  ))}
-                  
-                  {/* Default fallback upload slot */}
-                  <div 
-                    onClick={() => {
-                      if (canvas) {
-                        fabric.Image.fromURL("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&fit=crop&q=80", (img) => {
-                          img.set({ left: 100, top: 100 });
-                          img.scaleToWidth(300);
-                          canvas.add(img);
-                          canvas.renderAll();
-                        }, { crossOrigin: "anonymous" });
-                      }
-                    }}
-                    className="aspect-square bg-slate-100 rounded-xl overflow-hidden border border-purple-100 hover:border-purple-400 transition cursor-pointer shadow-sm"
-                  >
-                    <img 
-                      src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&h=150&fit=crop&q=80" 
-                      alt="Sample" 
-                      className="w-full h-full object-cover" 
-                    />
-                  </div>
-                </div>
-              </div>
+          {/* My Designs / Saved Gallery Panel */}
+          {activeTab === "mydesigns" && (
+            <SavedDesignsPanel
+              canvas={canvas}
+              designName={designName}
+              activeDesignId={activeDesignId}
+              onLoadDesign={(design) => {
+                setDesignName(design.name);
+                setActiveDesignId(design.id);
+                registerState();
+              }}
+            />
+          )}
+
+
+          {activeTab === "uploads" && (
+            <div className="flex-1 overflow-hidden flex flex-col h-full">
+              <AssetManagerPanel canvas={canvas} />
             </div>
           )}
 
           {/* Folders Panel */}
           {activeTab === "folders" && (
-            <div className="space-y-4">
+            <div className="space-y-4 flex-1 overflow-y-auto pr-1 pb-8">
               <h3 className="font-bold text-sm text-slate-800 flex items-center space-x-1.5">
-                <Folder className="w-4 h-4 text-purple-650" />
+                <Folder className="w-4 h-4 text-purple-655" />
                 <span>Saved Layouts folders</span>
               </h3>
 
@@ -531,56 +526,8 @@ export const DesignStudioPage: React.FC = () => {
 
           {/* AI Tools Panel */}
           {activeTab === "aitools" && (
-            <div className="space-y-5">
-              <h3 className="font-bold text-sm text-slate-800 flex items-center space-x-1.5">
-                <Sparkles className="w-4 h-4 text-purple-650" />
-                <span>AI Creative Assistant</span>
-              </h3>
-
-              {/* Tag Generator */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-purple-150 space-y-3 shadow-sm">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-700">AI Heading Generator</h4>
-                  <p className="text-[9.5px] text-slate-400 mt-0.5">Generate creative promotional heading layouts</p>
-                </div>
-                <textarea
-                  placeholder="E.g., Huge Midnight Sale 50% Off..."
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  className="w-full bg-white border border-purple-100 text-slate-800 text-xs p-2.5 rounded-xl focus:outline-none h-20 resize-none focus:border-purple-400"
-                />
-                <button
-                  onClick={generateAiDesign}
-                  disabled={isAiLoading || !aiPrompt}
-                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-slate-200 disabled:text-slate-400 text-white py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center space-x-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                  <span>{isAiLoading ? "Writing heading..." : "Add AI heading"}</span>
-                </button>
-              </div>
-
-              {/* Background Removal */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-purple-150 space-y-3 shadow-sm">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-700">AI Background Eraser</h4>
-                  <p className="text-[9.5px] text-slate-400 mt-0.5">Isolate photo subjects dynamically via AI</p>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Paste image URL to process..."
-                  value={aiRemoveBgUrl}
-                  onChange={(e) => setAiRemoveBgUrl(e.target.value)}
-                  className="w-full bg-white border border-purple-100 text-slate-800 text-xs px-2.5 py-2 rounded-xl focus:outline-none focus:border-purple-400"
-                />
-                <button
-                  onClick={removeImageBg}
-                  disabled={isAiRemoving || !aiRemoveBgUrl}
-                  className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 text-white py-2 rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center space-x-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{isAiRemoving ? "Removing BG..." : "Remove BG & Insert"}</span>
-                </button>
-              </div>
+            <div className="flex-1 overflow-hidden flex flex-col h-full">
+              <AiStudioPanel canvas={canvas} />
             </div>
           )}
 
@@ -598,13 +545,29 @@ export const DesignStudioPage: React.FC = () => {
             onSelectionChanged={handleSelectionChanged}
           />
 
-          {/* 4. Contextual Floating Toolbar */}
-          {selectedObject && (
-            <FloatingToolbar
+          {/* 4. Contextual Floating Toolbar OR Crop Toolbar */}
+          {isCropMode && selectedObject?.type === "image" ? (
+            <CropToolbar
               canvas={canvas}
               selectedObject={selectedObject}
-              onDelete={deleteActiveObject}
+              onCropDone={() => {
+                setIsCropMode(false);
+              }}
+              onCropCancel={() => setIsCropMode(false)}
             />
+          ) : (
+            selectedObject && (
+              <FloatingToolbar
+                canvas={canvas}
+                selectedObject={selectedObject}
+                onDelete={deleteActiveObject}
+                onStartCrop={
+                  selectedObject?.type === "image"
+                    ? () => setIsCropMode(true)
+                    : undefined
+                }
+              />
+            )
           )}
 
           {/* 5. Custom Context Menu (Right Click) */}
@@ -618,6 +581,20 @@ export const DesignStudioPage: React.FC = () => {
               onDelete={deleteActiveObject}
             />
           )}
+
+          {/* 6. Saved Flash Notification */}
+          {savedFlash && (
+            <div className="absolute top-4 right-4 z-50 pointer-events-none animate-fade-in">
+              <div className="flex items-center space-x-2.5 bg-emerald-500 text-white px-4 py-2.5 rounded-2xl shadow-xl shadow-emerald-400/30">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold">Design Saved!</p>
+                  <p className="text-[10px] text-emerald-100">Snapshot added to My Designs</p>
+                </div>
+              </div>
+            </div>
+          )}
+
         </main>
       </div>
 

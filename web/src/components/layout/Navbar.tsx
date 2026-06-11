@@ -309,7 +309,7 @@ export const Navbar: React.FC = () => {
                           <span>My Profile</span>
                         </Link>
                         <button 
-                          onClick={() => window.open("/design-studio", "_blank")}
+                          onClick={() => router.push("/dashboard?tab=command-center")}
                           className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-655 hover:bg-purple-50 hover:text-purple-700 rounded-lg transition-colors"
                         >
                           <Presentation className="w-3.5 h-3.5" />

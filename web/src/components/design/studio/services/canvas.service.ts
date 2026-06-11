@@ -4,10 +4,25 @@ export class CanvasService {
   // Load Google Font dynamically
   public static loadGoogleFont(fontName: string): Promise<void> {
     return new Promise((resolve) => {
-      // Avoid loading if already loaded
       const fontId = `google-font-${fontName.toLowerCase().replace(/\s+/g, "-")}`;
+      
+      const proceed = () => {
+        if (typeof document !== "undefined" && (document as any).fonts) {
+          (document as any).fonts.load(`1em "${fontName}"`)
+            .then(() => {
+              resolve();
+            })
+            .catch((err: any) => {
+              console.warn(`Error using FontFace API for: ${fontName}`, err);
+              resolve();
+            });
+        } else {
+          resolve();
+        }
+      };
+
       if (document.getElementById(fontId)) {
-        resolve();
+        proceed();
         return;
       }
 
@@ -16,10 +31,12 @@ export class CanvasService {
       link.rel = "stylesheet";
       link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/\s+/g, "+")}:wght@400;700&display=swap`;
       
-      link.onload = () => resolve();
+      link.onload = () => {
+        proceed();
+      };
       link.onerror = () => {
         console.warn(`Failed to load Google Font: ${fontName}`);
-        resolve(); // resolve anyway to avoid blocking
+        resolve();
       };
       
       document.head.appendChild(link);

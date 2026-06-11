@@ -1,10 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useDesignStudioStore } from "../stores/designStudio.store";
 import { CanvasService } from "../services/canvas.service";
 import { 
   Bold, Italic, AlignLeft, AlignCenter, AlignRight, 
   Trash2, RotateCw, RefreshCw, Type, Layers, Maximize,
-  ChevronDown, Paintbrush, Sliders, Grid 
+  ChevronDown, Paintbrush, Sliders, Grid, Crop,
+  AlignHorizontalJustifyCenter, AlignVerticalJustifyCenter,
+  AlignStartHorizontal, AlignEndHorizontal,
+  AlignStartVertical, AlignEndVertical,
+  Underline,
+  GripVertical,
+  Pin,
 } from "lucide-react";
 import { fabric } from "fabric";
 
@@ -12,15 +18,20 @@ interface FloatingToolbarProps {
   canvas: fabric.Canvas | null;
   selectedObject: fabric.Object | null;
   onDelete: () => void;
+  onStartCrop?: () => void;
 }
+
 
 export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
   canvas,
   selectedObject,
   onDelete,
+  onStartCrop,
 }) => {
-  const { zoom, panX, panY } = useDesignStudioStore();
+  const { zoom, panX, panY, showRulers } = useDesignStudioStore();
   const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const [userPosition, setUserPosition] = useState<{ top: number; left: number } | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   
   // Custom editing panel dropdown toggles
   const [activeDropdown, setActiveDropdown] = useState<"font" | "spacing" | "borders" | "shadows" | "filters" | null>(null);
@@ -41,9 +52,27 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
   const [blur, setBlur] = useState<number>(0);
 
   // List of preloaded premium Google Fonts
-  const FONTS_LIST = ["Outfit", "Inter", "Roboto", "Montserrat", "Playfair Display", "Dancing Script", "Oswald", "Lora"];
+  const FONTS_LIST = [
+    "Outfit", "Inter", "Poppins", "Roboto", "Montserrat", 
+    "Open Sans", "Lato", "Oswald", "Lora", 
+    "Dancing Script", "Pacifico", "Playfair Display"
+  ];
 
-  // Calculate coordinates
+  // Helper: safely extract a hex color string from fill (which may be a gradient/pattern/null)
+  const getFillColorStr = (obj: fabric.Object): string => {
+    const isLine = obj.type === "line";
+    const fill = isLine ? obj.get("stroke") : obj.get("fill");
+    if (!fill) return "#000000";
+    if (typeof fill === "string") return fill;
+    // Gradient/pattern — try to get the first color stop
+    if (typeof fill === "object" && "colorStops" in fill) {
+      const stops = (fill as any).colorStops;
+      if (Array.isArray(stops) && stops.length > 0) return stops[0].color || "#000000";
+    }
+    return "#000000";
+  };
+
+  // Position tracking — runs on zoom/pan/object movement
   useEffect(() => {
     if (!canvas || !selectedObject) return;
 
@@ -51,42 +80,31 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
       selectedObject.setCoords();
       const bound = selectedObject.getBoundingRect();
       const canvasEl = canvas.getElement();
+      if (!canvasEl) return;
       const canvasRect = canvasEl.getBoundingClientRect();
-      const containerRect = canvasEl.parentElement?.getBoundingClientRect();
+      const containerRect = canvasEl.parentElement?.parentElement?.parentElement?.getBoundingClientRect();
 
       if (!containerRect) return;
 
-      // Position above object bounding box, centered
-      const topOffset = canvasRect.top - containerRect.top + bound.top - 55;
-      const leftOffset = canvasRect.left - containerRect.left + bound.left + (bound.width / 2) - 200;
+      // Translate the bounding coordinates from scaled screen-space relative to container
+      const canvasTopInWorkspace = canvasRect.top - containerRect.top;
+      const canvasLeftInWorkspace = canvasRect.left - containerRect.left;
+
+      const objectTopScaled = bound.top * zoom;
+      const objectLeftScaled = bound.left * zoom;
+      const objectWidthScaled = bound.width * zoom;
+
+      const toolbarWidth = toolbarRef.current?.offsetWidth || 500;
+      const topOffset = canvasTopInWorkspace + objectTopScaled - 55;
+      const leftOffset = canvasLeftInWorkspace + objectLeftScaled + (objectWidthScaled / 2) - (toolbarWidth / 2);
 
       setCoords({
         top: Math.max(15, topOffset),
-        left: Math.max(15, Math.min(leftOffset, containerRect.width - 420)),
+        left: Math.max(15, Math.min(leftOffset, containerRect.width - toolbarWidth - 15)),
       });
     };
 
-    // Sync state properties from selected Fabric object to React toolbar states
-    const syncObjectProperties = () => {
-      setFillColor((selectedObject.get("fill") as string) || "#000000");
-      setOpacity(selectedObject.get("opacity") || 1);
-      
-      if (selectedObject.type === "i-text" || selectedObject.type === "textbox") {
-        const txt = selectedObject as any;
-        setFontSize(txt.get("fontSize") || 32);
-        setFontFamily(txt.get("fontFamily") || "Outfit");
-        setCharSpacing(txt.get("charSpacing") || 0);
-        setLineHeight(txt.get("lineHeight") || 1);
-      } else if (selectedObject.type === "rect") {
-        const rect = selectedObject as fabric.Rect;
-        setCornerRadius(rect.rx || 0);
-        setStrokeColor(rect.stroke || "#ffffff");
-        setStrokeWidth(rect.strokeWidth || 0);
-      }
-    };
-
     updatePosition();
-    syncObjectProperties();
 
     canvas.on("object:moving", updatePosition);
     canvas.on("object:scaling", updatePosition);
@@ -99,18 +117,46 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
     };
   }, [canvas, selectedObject, zoom, panX, panY]);
 
+  // Property sync — runs ONLY when the selected object changes, not on zoom/pan
+  useEffect(() => {
+    if (!canvas || !selectedObject) return;
+
+    setUserPosition(null); // Reset user drag offsets on selection change
+    setFillColor(getFillColorStr(selectedObject));
+    setOpacity(selectedObject.get("opacity") ?? 1);
+    setStrokeColor(selectedObject.get("stroke") as string || "#ffffff");
+    setStrokeWidth(selectedObject.get("strokeWidth") ?? 0);
+    
+    if (selectedObject.type === "i-text" || selectedObject.type === "textbox") {
+      const txt = selectedObject as any;
+      setFontSize(txt.get("fontSize") || 32);
+      setFontFamily(txt.get("fontFamily") || "Outfit");
+      setCharSpacing(txt.get("charSpacing") || 0);
+      setLineHeight(txt.get("lineHeight") || 1);
+    }
+    if (selectedObject.type === "rect" || selectedObject.type === "ellipse") {
+      const rect = selectedObject as any;
+      setCornerRadius(rect.rx || 0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedObject]);
+
   if (!canvas || !selectedObject) return null;
 
   const handleFontFamilyChange = async (font: string) => {
     setFontFamily(font);
     await CanvasService.loadGoogleFont(font);
-    selectedObject.set("fontFamily" as any, font);
-    canvas.renderAll();
+    if (selectedObject && (selectedObject.type === "i-text" || selectedObject.type === "textbox")) {
+      selectedObject.set("fontFamily" as any, font);
+      selectedObject.setCoords();
+      canvas.requestRenderAll();
+      canvas.fire("object:modified", { target: selectedObject });
+    }
     setActiveDropdown(null);
   };
 
   const handleTextStyleToggle = (style: "bold" | "italic" | "underline") => {
-    if (selectedObject.type === "i-text") {
+    if (selectedObject.type === "i-text" || selectedObject.type === "textbox") {
       const text = selectedObject as fabric.IText;
       if (style === "bold") {
         const isBold = text.fontWeight === "bold";
@@ -121,14 +167,16 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
       } else if (style === "underline") {
         text.set("underline", !text.underline);
       }
-      canvas.renderAll();
+      canvas.requestRenderAll();
+      canvas.fire("object:modified", { target: selectedObject });
     }
   };
 
   const handleTextAlign = (align: "left" | "center" | "right") => {
     if (selectedObject.type === "i-text" || selectedObject.type === "textbox") {
       selectedObject.set("textAlign" as any, align);
-      canvas.renderAll();
+      canvas.requestRenderAll();
+      canvas.fire("object:modified", { target: selectedObject });
     }
   };
 
@@ -136,7 +184,8 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
     const currentAngle = selectedObject.angle || 0;
     selectedObject.rotate((currentAngle + 90) % 360);
     selectedObject.setCoords();
-    canvas.renderAll();
+    canvas.requestRenderAll();
+    canvas.fire("object:modified", { target: selectedObject });
   };
 
   const handleFlip = (direction: "h" | "v") => {
@@ -145,18 +194,72 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
     } else {
       selectedObject.set("flipY", !selectedObject.flipY);
     }
-    canvas.renderAll();
+    canvas.requestRenderAll();
+    canvas.fire("object:modified", { target: selectedObject });
+  };
+
+  const handleDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    const startX = e.clientX;
+    const startY = e.clientY;
+    
+    const currentTop = userPosition?.top ?? coords.top;
+    const currentLeft = userPosition?.left ?? coords.left;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      
+      setUserPosition({
+        top: currentTop + dy,
+        left: currentLeft + dx,
+      });
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
   };
 
   const isText = selectedObject.type === "i-text" || selectedObject.type === "textbox";
-  const isShape = selectedObject.type === "rect" || selectedObject.type === "circle";
+  const isShape = selectedObject.type === "rect" || selectedObject.type === "circle" || selectedObject.type === "ellipse" || selectedObject.type === "line";
   const isImage = selectedObject.type === "image";
+  const isLine = selectedObject.type === "line";
 
   return (
     <div
-      style={{ top: coords.top, left: coords.left }}
-      className="absolute z-40 flex items-center bg-white border border-purple-150 rounded-2xl shadow-2xl p-1.5 space-x-1.5 select-none animate-fade-in pointer-events-auto shrink-0 max-w-[420px]"
+      ref={toolbarRef}
+      style={{
+        top: userPosition ? userPosition.top : coords.top,
+        left: userPosition ? userPosition.left : coords.left,
+      }}
+      className="absolute z-40 flex items-center bg-white border border-purple-150 rounded-2xl shadow-2xl p-1.5 space-x-1.5 select-none animate-fade-in pointer-events-auto shrink-0 w-max max-w-none"
     >
+      {/* Drag Handle */}
+      <div
+        onMouseDown={handleDragStart}
+        className="cursor-grab active:cursor-grabbing p-1 hover:bg-purple-50 text-slate-400 hover:text-purple-600 rounded-lg transition flex items-center shrink-0"
+        title="Drag to reposition toolbar"
+      >
+        <GripVertical className="w-4 h-4" />
+      </div>
+
+      {userPosition && (
+        <button
+          onClick={() => setUserPosition(null)}
+          className="p-1 hover:bg-purple-50 text-purple-600 hover:text-purple-800 rounded-lg transition flex items-center shrink-0"
+          title="Snap back to object"
+        >
+          <Pin className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {userPosition && <div className="h-5 w-px bg-purple-100/80" />}
       
       {/* ── Text Specific Controls ── */}
       {isText && (
@@ -172,12 +275,30 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
             </button>
             
             {activeDropdown === "font" && (
-              <div className="absolute bottom-11 left-0 bg-white border border-purple-100 rounded-xl p-1.5 shadow-2xl w-36 flex flex-col z-50 animate-fade-in max-h-48 overflow-y-auto">
+              <div className="absolute bottom-11 left-0 bg-white border border-purple-100 rounded-xl p-1.5 shadow-2xl w-44 flex flex-col z-50 animate-fade-in max-h-60 overflow-y-auto">
+                {/* Custom Google Font Loader */}
+                <div className="p-1 border-b border-purple-50 mb-1.5 flex items-center">
+                  <input
+                    type="text"
+                    placeholder="Load Google Font..."
+                    className="w-full bg-slate-50 border border-purple-100 text-[10px] px-2 py-1.5 rounded-lg focus:outline-none focus:bg-white text-slate-700 font-bold"
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const fontName = e.currentTarget.value.trim();
+                        if (fontName) {
+                          await handleFontFamilyChange(fontName);
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                
                 {FONTS_LIST.map((font) => (
                   <button
                     key={font}
                     onClick={() => handleFontFamilyChange(font)}
-                    className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-[11px] font-semibold text-slate-705 rounded-lg transition"
+                    className="w-full text-left px-3 py-1.5 hover:bg-purple-50 text-[11px] font-semibold text-slate-700 rounded-lg transition"
                     style={{ fontFamily: font }}
                   >
                     {font}
@@ -196,7 +317,8 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
                 const ns = Math.max(10, fontSize - 2);
                 setFontSize(ns);
                 selectedObject.set("fontSize" as any, ns);
-                canvas.renderAll();
+                canvas.requestRenderAll();
+                canvas.fire("object:modified", { target: selectedObject });
               }}
               className="px-1 text-slate-400 hover:text-slate-700 font-bold"
             >
@@ -209,7 +331,8 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
                 const ns = parseInt(e.target.value) || 12;
                 setFontSize(ns);
                 selectedObject.set("fontSize" as any, ns);
-                canvas.renderAll();
+                canvas.requestRenderAll();
+                canvas.fire("object:modified", { target: selectedObject });
               }}
               className="w-8 bg-transparent text-center text-[11px] font-bold text-slate-700 focus:outline-none"
             />
@@ -218,7 +341,8 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
                 const ns = Math.min(200, fontSize + 2);
                 setFontSize(ns);
                 selectedObject.set("fontSize" as any, ns);
-                canvas.renderAll();
+                canvas.requestRenderAll();
+                canvas.fire("object:modified", { target: selectedObject });
               }}
               className="px-1 text-slate-400 hover:text-slate-700 font-bold"
             >
@@ -242,10 +366,32 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
             <Italic className="w-3.5 h-3.5" />
           </button>
           <button
+            onClick={() => handleTextStyleToggle("underline")}
+            className="p-2 text-slate-500 hover:text-purple-750 hover:bg-purple-50 rounded-xl transition"
+            title="Underline"
+          >
+            <Underline className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => handleTextAlign("left")}
+            className="p-2 text-slate-500 hover:text-purple-750 hover:bg-purple-50 rounded-xl transition"
+            title="Align Left"
+          >
+            <AlignLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
             onClick={() => handleTextAlign("center")}
             className="p-2 text-slate-500 hover:text-purple-750 hover:bg-purple-50 rounded-xl transition"
+            title="Align Center"
           >
             <AlignCenter className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => handleTextAlign("right")}
+            className="p-2 text-slate-500 hover:text-purple-750 hover:bg-purple-50 rounded-xl transition"
+            title="Align Right"
+          >
+            <AlignRight className="w-3.5 h-3.5" />
           </button>
           
           <div className="h-5 w-px bg-purple-100/80" />
@@ -375,6 +521,20 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
       {/* ── Image Specific Controls ── */}
       {isImage && (
         <>
+          {/* Crop Button */}
+          {onStartCrop && (
+            <button
+              onClick={onStartCrop}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 hover:bg-purple-50 text-xs font-bold text-slate-700 hover:text-purple-700 rounded-xl transition border border-purple-100 hover:border-purple-300"
+              title="Crop Image (C)"
+            >
+              <Crop className="w-3.5 h-3.5" />
+              <span>Crop</span>
+            </button>
+          )}
+
+          <div className="h-5 w-px bg-purple-100/80" />
+
           {/* Image Filters dropdown */}
           <div className="relative">
             <button
@@ -472,12 +632,21 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
               type="color"
               value={fillColor}
               onChange={(e) => {
-                setFillColor(e.target.value);
-                selectedObject.set("fill", e.target.value);
-                canvas.renderAll();
+                const newColor = e.target.value;
+                setFillColor(newColor);
+                if (isLine) {
+                  setStrokeColor(newColor);
+                  selectedObject.set("stroke", newColor);
+                } else {
+                  selectedObject.set("fill", newColor);
+                }
+                selectedObject.setCoords();
+                canvas.requestRenderAll();
+                canvas.fire("object:modified", { target: selectedObject });
               }}
               className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent"
             />
+            <span className="text-[9px] font-mono text-slate-300 uppercase">{fillColor}</span>
           </div>
         </>
       )}
@@ -496,7 +665,8 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
             const val = parseFloat(e.target.value);
             setOpacity(val);
             selectedObject.set("opacity", val);
-            canvas.renderAll();
+            canvas.requestRenderAll();
+            canvas.fire("object:modified", { target: selectedObject });
           }}
           className="w-12 accent-purple-650"
         />

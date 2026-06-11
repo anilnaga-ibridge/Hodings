@@ -58,7 +58,7 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
   });
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       
       {/* Search Header */}
       <div className="pb-3 border-b border-purple-50 shrink-0">

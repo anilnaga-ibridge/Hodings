@@ -8,28 +8,52 @@ interface ZoomControlsProps {
 }
 
 export const ZoomControls: React.FC<ZoomControlsProps> = ({ canvas }) => {
-  const { zoom, setZoom, setPan, canvasWidth, canvasHeight } = useDesignStudioStore();
+  const { zoom, setZoom, setPan, canvasWidth, canvasHeight, panX, panY } = useDesignStudioStore();
   const [showDropdown, setShowDropdown] = useState(false);
 
   const handleZoomIn = () => {
     if (!canvas) return;
     const newZoom = Math.min(5.0, zoom + 0.1);
-    setZoom(newZoom);
-    canvas.setZoom(newZoom);
-    canvas.renderAll();
+    
+    // Zoom relative to viewport center
+    const parent = canvas.getElement()?.parentElement?.parentElement?.parentElement;
+    if (parent) {
+      const cw = parent.clientWidth || 800;
+      const ch = parent.clientHeight || 600;
+      const mouseX = cw / 2;
+      const mouseY = ch / 2;
+      const newPanX = mouseX - (mouseX - panX) * (newZoom / zoom);
+      const newPanY = mouseY - (mouseY - panY) * (newZoom / zoom);
+      setZoom(newZoom);
+      setPan(newPanX, newPanY);
+    } else {
+      setZoom(newZoom);
+    }
   };
 
   const handleZoomOut = () => {
     if (!canvas) return;
     const newZoom = Math.max(0.1, zoom - 0.1);
-    setZoom(newZoom);
-    canvas.setZoom(newZoom);
-    canvas.renderAll();
+    
+    // Zoom relative to viewport center
+    const parent = canvas.getElement()?.parentElement?.parentElement?.parentElement;
+    if (parent) {
+      const cw = parent.clientWidth || 800;
+      const ch = parent.clientHeight || 600;
+      const mouseX = cw / 2;
+      const mouseY = ch / 2;
+      const newPanX = mouseX - (mouseX - panX) * (newZoom / zoom);
+      const newPanY = mouseY - (mouseY - panY) * (newZoom / zoom);
+      setZoom(newZoom);
+      setPan(newPanX, newPanY);
+    } else {
+      setZoom(newZoom);
+    }
   };
 
   const handleZoomFit = () => {
     if (!canvas) return;
-    const parent = canvas.getElement().parentElement;
+    const parent = canvas.getElement()?.parentElement?.parentElement?.parentElement;
     if (!parent) return;
     const cw = parent.clientWidth || 800;
     const ch = parent.clientHeight || 600;
@@ -43,17 +67,25 @@ export const ZoomControls: React.FC<ZoomControlsProps> = ({ canvas }) => {
 
     setZoom(initialScale);
     setPan(centerPanX, centerPanY);
-
-    canvas.setZoom(initialScale);
-    canvas.absolutePan(new fabric.Point(-centerPanX, -centerPanY));
-    canvas.renderAll();
   };
 
   const handleZoomSelect = (val: number) => {
     if (!canvas) return;
-    setZoom(val);
-    canvas.setZoom(val);
-    canvas.renderAll();
+    
+    // Zoom relative to viewport center
+    const parent = canvas.getElement()?.parentElement?.parentElement?.parentElement;
+    if (parent) {
+      const cw = parent.clientWidth || 800;
+      const ch = parent.clientHeight || 600;
+      const mouseX = cw / 2;
+      const mouseY = ch / 2;
+      const newPanX = mouseX - (mouseX - panX) * (val / zoom);
+      const newPanY = mouseY - (mouseY - panY) * (val / zoom);
+      setZoom(val);
+      setPan(newPanX, newPanY);
+    } else {
+      setZoom(val);
+    }
     setShowDropdown(false);
   };
 

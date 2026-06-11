@@ -144,9 +144,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           <button
             onClick={() => {
               // Create default rectangle at context coords
+              const canvasEl = canvas.getElement();
+              if (!canvasEl) return;
               const rect = new fabric.Rect({
-                left: x - canvas.getElement().getBoundingClientRect().left,
-                top: y - canvas.getElement().getBoundingClientRect().top,
+                left: x - canvasEl.getBoundingClientRect().left,
+                top: y - canvasEl.getBoundingClientRect().top,
                 width: 150,
                 height: 150,
                 fill: "#6366F1",
@@ -163,9 +165,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           <button
             onClick={() => {
               // Create default text at context coords
+              const canvasEl = canvas.getElement();
+              if (!canvasEl) return;
               const text = new fabric.IText("Double click to edit", {
-                left: x - canvas.getElement().getBoundingClientRect().left,
-                top: y - canvas.getElement().getBoundingClientRect().top,
+                left: x - canvasEl.getBoundingClientRect().left,
+                top: y - canvasEl.getBoundingClientRect().top,
                 fontSize: 32,
                 fontFamily: "Outfit",
                 fill: "#1E293B",

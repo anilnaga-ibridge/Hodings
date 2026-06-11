@@ -5,6 +5,7 @@ import { fetchProfile, updateProfile, forceLogout, toggleMfa } from "@/store/sli
 import { fetchOwnerBillboards, createBillboard, updateBillboard, deleteBillboard } from "@/store/slices/billboardSlice";
 import { fetchBrandAssets, createBrandAsset, deleteBrandAsset, updateBrandAsset, uploadFile } from "@/store/slices/brandSlice";
 import { api } from "@/config/axios";
+import { CreativeCommandCenter } from "@/components/dashboard/CreativeCommandCenter";
 import { 
   User, ShieldAlert, Sparkles, Download, Trash2, Mail, Bell, 
   Building, Check, RefreshCw, Plus, MapPin, LayoutGrid, DollarSign, 
@@ -119,7 +120,7 @@ export const DashboardPage: React.FC = () => {
       setActiveSubTab(tabParam);
     } else if (user) {
       if (user.role === "CUSTOMER") {
-        setActiveSubTab("brands");
+        setActiveSubTab("command-center");
       } else if (user.role === "PARTNER") {
         setActiveSubTab("referrals");
       } else if (user.role === "SUB_USER") {
@@ -495,6 +496,16 @@ export const DashboardPage: React.FC = () => {
           {user.role === "CUSTOMER" && (
             <>
               <button
+                onClick={() => setActiveSubTab("command-center")}
+                className={`px-4 py-2 text-xs font-semibold rounded-md transition-all ${
+                  activeSubTab === "command-center"
+                    ? "bg-purple-650 text-white shadow-sm"
+                    : "text-slate-500 hover:text-purple-700 hover:bg-purple-100/50"
+                }`}
+              >
+                ⚡ Creative Command Center
+              </button>
+              <button
                 onClick={() => setActiveSubTab("brands")}
                 className={`px-4 py-2 text-xs font-semibold rounded-md transition-all ${
                   activeSubTab === "brands"
@@ -590,6 +601,11 @@ export const DashboardPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* RENDER OPTION 0: CREATIVE COMMAND CENTER */}
+      {activeSubTab === "command-center" && (
+        <CreativeCommandCenter />
+      )}
 
       {/* RENDER OPTION 1: SHARED PROFILE SETTINGS */}
       {activeSubTab === "profile" && (
